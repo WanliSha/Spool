@@ -4,12 +4,27 @@
   import { open } from "@tauri-apps/plugin-dialog";
 
   let files = $state([]);
+  let thumbnails = $state({});
   let dragging = $state(false);
+
+  async function loadThumbnail(path) {
+    if (thumbnails[path]) return;
+    try {
+      const data = await invoke("get_thumbnail", { path });
+      thumbnails = { ...thumbnails, [path]: data };
+    } catch (e) {
+      console.error("Thumbnail error:", e);
+    }
+  }
 
   async function importPaths(paths) {
     if (!paths || paths.length === 0) return;
     const entries = await invoke("scan_paths", { paths, recursive: false });
     files = [...files, ...entries];
+    // Load thumbnails in background
+    for (const entry of entries) {
+      loadThumbnail(entry.path);
+    }
   }
 
   async function openFiles() {
@@ -89,9 +104,20 @@
     <div class="file-list" class:dragging>
       {#each files as file}
         <div class="file-item">
-          <span class="file-name">{file.filename}</span>
-          <span class="file-size">{formatSize(file.size)}</span>
-          <span class="file-path">{file.path}</span>
+          <div class="file-thumb">
+            {#if thumbnails[file.path]}
+              <img src="data:image/jpeg;base64,{thumbnails[file.path]}" alt={file.filename} />
+            {:else}
+              <div class="thumb-placeholder"></div>
+            {/if}
+          </div>
+          <div class="file-info">
+            <span class="file-name">{file.filename}</span>
+            <span class="file-meta">
+              <span class="file-size">{formatSize(file.size)}</span>
+              <span class="file-path">{file.path}</span>
+            </span>
+          </div>
         </div>
       {/each}
     </div>
@@ -202,28 +228,60 @@
   }
 
   .file-item {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
     padding: 8px 16px;
     border-bottom: 1px solid #eee;
   }
 
+  .file-thumb {
+    flex-shrink: 0;
+    width: 48px;
+    height: 48px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: #e0e0e0;
+  }
+
+  .file-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .thumb-placeholder {
+    width: 100%;
+    height: 100%;
+    background: #e0e0e0;
+  }
+
+  .file-info {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
   .file-name {
     font-weight: 500;
-    grid-column: 1;
+  }
+
+  .file-meta {
+    display: flex;
+    gap: 8px;
+    align-items: center;
   }
 
   .file-size {
     color: #888;
-    grid-column: 2;
-    text-align: right;
+    font-size: 12px;
   }
 
   .file-path {
     color: #aaa;
     font-size: 12px;
-    grid-column: 1 / -1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -251,6 +309,10 @@
 
     .drop-zone {
       border-color: #444;
+    }
+
+    .file-thumb, .thumb-placeholder {
+      background: #333;
     }
   }
 </style>

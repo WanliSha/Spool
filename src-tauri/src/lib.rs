@@ -1,3 +1,5 @@
+mod thumbnail;
+
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -65,7 +67,12 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .invoke_handler(tauri::generate_handler![scan_paths])
+        .invoke_handler(tauri::generate_handler![
+            scan_paths,
+            thumbnail::get_thumbnail,
+            thumbnail::get_cache_stats,
+            thumbnail::clear_cache,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
