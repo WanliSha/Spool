@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
+  import MapPicker from "$lib/components/MapPicker.svelte";
 
   let files = $state([]);
   let thumbnails = $state({});
@@ -9,6 +10,7 @@
   let selectedFile = $state(null);
   let exifData = $state(null);
   let modifiedFiles = $state(new Set());
+  let mapSavedVersion = $state(0);
 
   async function loadThumbnail(path) {
     if (thumbnails[path]) return;
@@ -131,11 +133,11 @@
   async function save() {
     if (!selectedFile) return;
     try {
-      await invoke("save_exif", { path: selectedFile.path });
+      exifData = await invoke("save_exif", { path: selectedFile.path });
       const next = new Set(modifiedFiles);
       next.delete(selectedFile.path);
       modifiedFiles = next;
-      exifData = await invoke("read_exif", { path: selectedFile.path });
+      mapSavedVersion++;
     } catch (e) {
       console.error("Save error:", e);
     }
@@ -146,7 +148,9 @@
       await invoke("save_all_exif");
       modifiedFiles = new Set();
       if (selectedFile) {
-        exifData = await invoke("read_exif", { path: selectedFile.path });
+        // Re-read from in-memory state (not file) to get updated snapshot
+        exifData = await invoke("save_exif", { path: selectedFile.path });
+        mapSavedVersion++;
       }
     } catch (e) {
       console.error("Save all error:", e);
@@ -157,6 +161,37 @@
     if (bytes < 1024) return bytes + " B";
     if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function parseGps(fields) {
+    if (!fields) return { lat: null, lng: null };
+    const latStr = fields.GPSLatitude;
+    const lngStr = fields.GPSLongitude;
+    const latRef = fields.GPSLatitudeRef;
+    const lngRef = fields.GPSLongitudeRef;
+    if (!latStr || !lngStr) return { lat: null, lng: null };
+    let lat = parseFloat(latStr);
+    let lng = parseFloat(lngStr);
+    if (isNaN(lat) || isNaN(lng)) return { lat: null, lng: null };
+    if (latRef === "S") lat = -lat;
+    if (lngRef === "W") lng = -lng;
+    return { lat, lng };
+  }
+
+  function getSavedGps() {
+    return parseGps(exifData?.snapshot);
+  }
+
+  async function handleMapChange({ lat, lng }) {
+    if (!selectedFile) return;
+    const latRef = lat >= 0 ? "N" : "S";
+    const lngRef = lng >= 0 ? "E" : "W";
+    const absLat = Math.abs(lat).toString();
+    const absLng = Math.abs(lng).toString();
+    await updateField("GPSLatitude", absLat);
+    await updateField("GPSLongitude", absLng);
+    await updateField("GPSLatitudeRef", latRef);
+    await updateField("GPSLongitudeRef", lngRef);
   }
 
   function handleKeydown(event) {
@@ -306,6 +341,14 @@
                 {/if}
               </div>
             {/each}
+            <div class="map-section">
+              <MapPicker
+                lat={getSavedGps().lat}
+                lng={getSavedGps().lng}
+                savedVersion={mapSavedVersion}
+                onchange={handleMapChange}
+              />
+            </div>
           </div>
         {:else}
           <div class="editor-empty">
@@ -315,6 +358,7 @@
       </div>
     </div>
   {/if}
+
 </main>
 
 <style>
@@ -582,6 +626,12 @@
     color: #333;
   }
 
+  .map-section {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #eee;
+  }
+
   .editor-empty {
     flex: 1;
     display: flex;
@@ -651,6 +701,10 @@
 
     .field-value {
       color: #ccc;
+    }
+
+    .map-section {
+      border-top-color: #333;
     }
   }
 </style>
