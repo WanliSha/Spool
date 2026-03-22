@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Dark background -->
+  <rect width="512" height="512" fill="#1a1a1a"/>
+
+  <!--
+    Inner circle: center (256,256), r=145
+    Outer circle (1.5x): center (256,256), r=217.5
+    Tangent point at θ=45° on inner circle: (358, 358)
+    End point at θ=-40° on outer circle: (423, 116)
+    First control point along tangent direction (0.707, -0.707)
+  -->
+  <path d="M 358 358 C 429 287, 450 180, 423 116"
+        fill="none" stroke="white" stroke-width="14" stroke-linecap="round"/>
+
+  <!-- Outer spool ring -->
+  <circle cx="256" cy="256" r="145" fill="none" stroke="white" stroke-width="14"/>
+
+  <!-- Center hub -->
+  <circle cx="256" cy="256" r="38" fill="white"/>
+
+  <!-- Center hole -->
+  <circle cx="256" cy="256" r="12" fill="#1a1a1a"/>
+</svg>
