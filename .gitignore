@@ -1,0 +1,32 @@
+# Rust
+/target/
+Cargo.lock
+
+# Tauri
+/src-tauri/target/
+
+# Node / Frontend
+node_modules/
+dist/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Svelte
+/build
+/.svelte-kit
+/package
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+# Environment
+.env
+.env.*
+!.env.example

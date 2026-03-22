@@ -1,0 +1,8 @@
+schema: spec-driven
+
+context: |
+  Project: Spool — Cross-platform photo EXIF editor
+  Tech stack: Rust (Tauri backend) + Web frontend + Leaflet.js (OSM)
+  Platforms: Windows, Linux, macOS
+  License: Dual-licensed (GPLv3 + Commercial)
+  Language: Documentation in English, user-facing text TBD
