@@ -1,3 +1,4 @@
+mod exif;
 mod thumbnail;
 
 use serde::Serialize;
@@ -67,11 +68,20 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(exif::ExifStore::new())
         .invoke_handler(tauri::generate_handler![
             scan_paths,
             thumbnail::get_thumbnail,
             thumbnail::get_cache_stats,
             thumbnail::clear_cache,
+            exif::read_exif,
+            exif::update_exif,
+            exif::undo_exif,
+            exif::reset_exif,
+            exif::reset_all_exif,
+            exif::save_exif,
+            exif::save_all_exif,
+            exif::get_modified_files,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -6,6 +6,9 @@
   let files = $state([]);
   let thumbnails = $state({});
   let dragging = $state(false);
+  let selectedFile = $state(null);
+  let exifData = $state(null);
+  let modifiedFiles = $state(new Set());
 
   async function loadThumbnail(path) {
     if (thumbnails[path]) return;
@@ -21,7 +24,6 @@
     if (!paths || paths.length === 0) return;
     const entries = await invoke("scan_paths", { paths, recursive: false });
     files = [...files, ...entries];
-    // Load thumbnails in background
     for (const entry of entries) {
       loadThumbnail(entry.path);
     }
@@ -55,6 +57,100 @@
 
   function clearFiles() {
     files = [];
+    selectedFile = null;
+    exifData = null;
+    modifiedFiles = new Set();
+  }
+
+  async function selectFile(file) {
+    selectedFile = file;
+    try {
+      exifData = await invoke("read_exif", { path: file.path });
+    } catch (e) {
+      console.error("Read EXIF error:", e);
+      exifData = { fields: {}, modified: false };
+    }
+  }
+
+  async function updateField(field, value) {
+    if (!selectedFile) return;
+    try {
+      exifData = await invoke("update_exif", {
+        request: { path: selectedFile.path, field, value },
+      });
+      if (exifData.modified) {
+        modifiedFiles = new Set([...modifiedFiles, selectedFile.path]);
+      } else {
+        const next = new Set(modifiedFiles);
+        next.delete(selectedFile.path);
+        modifiedFiles = next;
+      }
+    } catch (e) {
+      console.error("Update EXIF error:", e);
+    }
+  }
+
+  async function undo() {
+    if (!selectedFile) return;
+    try {
+      exifData = await invoke("undo_exif", { path: selectedFile.path });
+      if (!exifData.modified) {
+        const next = new Set(modifiedFiles);
+        next.delete(selectedFile.path);
+        modifiedFiles = next;
+      }
+    } catch (e) {
+      console.error("Undo error:", e);
+    }
+  }
+
+  async function reset() {
+    if (!selectedFile) return;
+    try {
+      exifData = await invoke("reset_exif", { path: selectedFile.path });
+      const next = new Set(modifiedFiles);
+      next.delete(selectedFile.path);
+      modifiedFiles = next;
+    } catch (e) {
+      console.error("Reset error:", e);
+    }
+  }
+
+  async function resetAll() {
+    try {
+      const affected = await invoke("reset_all_exif");
+      modifiedFiles = new Set();
+      if (selectedFile) {
+        exifData = await invoke("read_exif", { path: selectedFile.path });
+      }
+    } catch (e) {
+      console.error("Reset all error:", e);
+    }
+  }
+
+  async function save() {
+    if (!selectedFile) return;
+    try {
+      await invoke("save_exif", { path: selectedFile.path });
+      const next = new Set(modifiedFiles);
+      next.delete(selectedFile.path);
+      modifiedFiles = next;
+      exifData = await invoke("read_exif", { path: selectedFile.path });
+    } catch (e) {
+      console.error("Save error:", e);
+    }
+  }
+
+  async function saveAll() {
+    try {
+      await invoke("save_all_exif");
+      modifiedFiles = new Set();
+      if (selectedFile) {
+        exifData = await invoke("read_exif", { path: selectedFile.path });
+      }
+    } catch (e) {
+      console.error("Save all error:", e);
+    }
   }
 
   function formatSize(bytes) {
@@ -63,7 +159,57 @@
     return (bytes / (1024 * 1024)).toFixed(1) + " MB";
   }
 
-  // Listen for Tauri drag-and-drop events
+  function handleKeydown(event) {
+    if ((event.metaKey || event.ctrlKey) && event.key === "z") {
+      event.preventDefault();
+      undo();
+    }
+    if ((event.metaKey || event.ctrlKey) && event.key === "s") {
+      event.preventDefault();
+      save();
+    }
+  }
+
+  const FIELD_LABELS = {
+    Make: "Camera Make",
+    Model: "Camera Model",
+    LensMake: "Lens Make",
+    LensModel: "Lens Model",
+    LensInfo: "Lens Info",
+    Software: "Software",
+    Artist: "Artist",
+    Copyright: "Copyright",
+    ImageDescription: "Description",
+    DateTimeOriginal: "Date Taken",
+    CreateDate: "Date Created",
+    ModifyDate: "Date Modified",
+    ISO: "ISO",
+    FNumber: "Aperture",
+    ExposureTime: "Shutter Speed",
+    FocalLength: "Focal Length",
+    FocalLengthIn35mmFormat: "Focal Length (35mm)",
+    ExposureProgram: "Exposure Program",
+    MeteringMode: "Metering Mode",
+    Flash: "Flash",
+    WhiteBalance: "White Balance",
+    ImageWidth: "Width",
+    ImageHeight: "Height",
+    Orientation: "Orientation",
+    GPSLatitudeRef: "GPS Lat Ref",
+    GPSLatitude: "GPS Latitude",
+    GPSLongitudeRef: "GPS Lng Ref",
+    GPSLongitude: "GPS Longitude",
+    GPSAltitudeRef: "GPS Alt Ref",
+    GPSAltitude: "GPS Altitude",
+    UserComment: "Comment",
+  };
+
+  const EDITABLE_FIELDS = [
+    "Make", "Model", "LensMake", "LensModel", "Software", "Artist", "Copyright",
+    "ImageDescription", "DateTimeOriginal", "CreateDate", "ModifyDate",
+    "GPSLatitudeRef", "GPSLongitudeRef", "UserComment",
+  ];
+
   getCurrentWindow().onDragDropEvent((event) => {
     if (event.payload.type === "over") {
       dragging = true;
@@ -78,6 +224,8 @@
     }
   });
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <main class="container">
   {#if files.length === 0}
@@ -98,28 +246,73 @@
       <div class="toolbar-buttons">
         <button onclick={openFiles}>Add Files</button>
         <button onclick={openFolder}>Add Folder</button>
+        {#if modifiedFiles.size > 0}
+          <button onclick={saveAll}>Save All</button>
+          <button onclick={resetAll}>Reset All</button>
+        {/if}
         <button class="clear" onclick={clearFiles}>Clear</button>
       </div>
     </div>
-    <div class="file-list" class:dragging>
-      {#each files as file}
-        <div class="file-item">
-          <div class="file-thumb">
-            {#if thumbnails[file.path]}
-              <img src="data:image/jpeg;base64,{thumbnails[file.path]}" alt={file.filename} />
-            {:else}
-              <div class="thumb-placeholder"></div>
-            {/if}
-          </div>
-          <div class="file-info">
-            <span class="file-name">{file.filename}</span>
-            <span class="file-meta">
+    <div class="main-content">
+      <div class="file-list" class:dragging>
+        {#each files as file}
+          <button
+            type="button"
+            class="file-item"
+            class:selected={selectedFile?.path === file.path}
+            class:modified={modifiedFiles.has(file.path)}
+            onclick={() => selectFile(file)}
+          >
+            <div class="file-thumb">
+              {#if thumbnails[file.path]}
+                <img src="data:image/jpeg;base64,{thumbnails[file.path]}" alt={file.filename} />
+              {:else}
+                <div class="thumb-placeholder"></div>
+              {/if}
+            </div>
+            <div class="file-info">
+              <span class="file-name">
+                {#if modifiedFiles.has(file.path)}<span class="mod-dot"></span>{/if}
+                {file.filename}
+              </span>
               <span class="file-size">{formatSize(file.size)}</span>
-              <span class="file-path">{file.path}</span>
-            </span>
+            </div>
+          </button>
+        {/each}
+      </div>
+
+      <div class="editor-panel">
+        {#if selectedFile && exifData}
+          <div class="editor-header">
+            <h3>{selectedFile.filename}</h3>
+            <div class="editor-actions">
+              <button onclick={undo} title="Undo (Cmd+Z)">Undo</button>
+              <button onclick={reset}>Reset</button>
+              <button onclick={save} title="Save (Cmd+S)" class:primary={exifData.modified}>Save</button>
+            </div>
           </div>
-        </div>
-      {/each}
+          <div class="editor-fields">
+            {#each Object.entries(FIELD_LABELS) as [field, label]}
+              <div class="field-row">
+                <label for={field}>{label}</label>
+                {#if EDITABLE_FIELDS.includes(field)}
+                  <input
+                    id={field}
+                    value={exifData.fields[field] || ""}
+                    onchange={(e) => updateField(field, e.target.value)}
+                  />
+                {:else}
+                  <span class="field-value">{exifData.fields[field] || "—"}</span>
+                {/if}
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <div class="editor-empty">
+            <p>Select a photo to view and edit EXIF data</p>
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </main>
@@ -182,12 +375,12 @@
   }
 
   button {
-    padding: 8px 16px;
+    padding: 6px 12px;
     border-radius: 6px;
     border: 1px solid #ccc;
     background: #fff;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 500;
   }
 
@@ -199,12 +392,19 @@
     color: #888;
   }
 
+  button.primary {
+    background: #396cd8;
+    color: #fff;
+    border-color: #396cd8;
+  }
+
   .toolbar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
+    padding: 8px 16px;
     border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
   }
 
   .file-count {
@@ -213,13 +413,20 @@
 
   .toolbar-buttons {
     display: flex;
-    gap: 8px;
+    gap: 6px;
+  }
+
+  .main-content {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
   }
 
   .file-list {
-    flex: 1;
+    width: 300px;
     overflow-y: auto;
-    padding: 0;
+    border-right: 1px solid #e0e0e0;
+    flex-shrink: 0;
     transition: all 0.2s;
   }
 
@@ -230,15 +437,33 @@
   .file-item {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 8px 16px;
+    gap: 8px;
+    padding: 6px 12px;
     border-bottom: 1px solid #eee;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    font-size: inherit;
+    color: inherit;
+  }
+
+  .file-item:hover {
+    background: #f0f0f0;
+  }
+
+  .file-item.selected {
+    background: #e8eeff;
   }
 
   .file-thumb {
     flex-shrink: 0;
-    width: 48px;
-    height: 48px;
+    width: 40px;
+    height: 40px;
     border-radius: 4px;
     overflow: hidden;
     background: #e0e0e0;
@@ -261,30 +486,108 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
   }
 
   .file-name {
     font-weight: 500;
-  }
-
-  .file-meta {
-    display: flex;
-    gap: 8px;
-    align-items: center;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .file-size {
     color: #888;
-    font-size: 12px;
+    font-size: 11px;
   }
 
-  .file-path {
-    color: #aaa;
-    font-size: 12px;
+  .mod-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #f59e0b;
+    margin-right: 4px;
+    vertical-align: middle;
+  }
+
+  .editor-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .editor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    border-bottom: 1px solid #e0e0e0;
+  }
+
+  .editor-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .editor-actions {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .editor-fields {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 16px;
+  }
+
+  .field-row {
+    display: flex;
+    align-items: center;
+    padding: 4px 0;
+    gap: 8px;
+  }
+
+  .field-row label {
+    width: 140px;
+    flex-shrink: 0;
+    font-size: 12px;
+    color: #666;
+    text-align: right;
+  }
+
+  .field-row input {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+
+  .field-row input:focus {
+    outline: none;
+    border-color: #396cd8;
+  }
+
+  .field-value {
+    flex: 1;
+    font-size: 13px;
+    color: #333;
+  }
+
+  .editor-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #888;
   }
 
   @media (prefers-color-scheme: dark) {
@@ -299,12 +602,29 @@
       color: #f6f6f6;
     }
 
+    button.primary {
+      background: #396cd8;
+      border-color: #396cd8;
+    }
+
     .toolbar {
       border-bottom-color: #333;
     }
 
+    .file-list {
+      border-right-color: #333;
+    }
+
     .file-item {
       border-bottom-color: #333;
+    }
+
+    .file-item:hover {
+      background: #2a2a2a;
+    }
+
+    .file-item.selected {
+      background: #1e2a4a;
     }
 
     .drop-zone {
@@ -313,6 +633,24 @@
 
     .file-thumb, .thumb-placeholder {
       background: #333;
+    }
+
+    .editor-header {
+      border-bottom-color: #333;
+    }
+
+    .field-row label {
+      color: #999;
+    }
+
+    .field-row input {
+      background: #2a2a2a;
+      border-color: #444;
+      color: #f6f6f6;
+    }
+
+    .field-value {
+      color: #ccc;
     }
   }
 </style>

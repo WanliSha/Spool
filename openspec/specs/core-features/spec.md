@@ -9,8 +9,24 @@ Also supports general EXIF editing for digital photos.
 ## Editing
 
 ### Single Photo Edit
-- View and edit any EXIF/IPTC/XMP field
-- Full field coverage (like ExifTool)
+- View and edit EXIF fields
+- Uses `little_exif` crate (pure Rust, read+write)
+
+### Supported EXIF Fields
+
+**Editable (string fields):**
+- Camera: Make, Model
+- Lens: LensMake, LensModel
+- Metadata: Software, Artist, Copyright, ImageDescription
+- Dates: DateTimeOriginal, CreateDate, ModifyDate
+- GPS: GPSLatitudeRef, GPSLongitudeRef
+- Other: UserComment
+
+**Read-only (numeric/rational fields):**
+- Exposure: ISO, FNumber, ExposureTime, ExposureProgram, MeteringMode, Flash, WhiteBalance
+- Lens: LensInfo, FocalLength, FocalLengthIn35mmFormat
+- Image: ImageWidth, ImageHeight, Orientation
+- GPS: GPSLatitude, GPSLongitude, GPSAltitudeRef, GPSAltitude
 
 ### Batch Edit
 - Select multiple photos
