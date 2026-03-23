@@ -1,6 +1,7 @@
 # Spool
 
-Cross-platform photo EXIF editor built for film photographers.
+Cross-platform photo metadata editor built for film photographers.
+Supports EXIF, XMP, and IPTC — unified UI, automatic sync across formats.
 Rust (Tauri) + Svelte + Leaflet.js (OpenStreetMap).
 
 ## Project Context
@@ -13,7 +14,8 @@ Rust (Tauri) + Svelte + Leaflet.js (OpenStreetMap).
 - Backend: Rust (Tauri)
 - Frontend: Svelte
 - Map: OpenStreetMap + Leaflet.js
-- Image decoding: `image` crate + `libraw-rs`
+- Image decoding: `image` crate + `rawler` (pure Rust RAW)
+- Metadata: `little_exif` (EXIF) + custom XMP/IPTC parsers
 - License: GPLv3 + Commercial dual licensing
 
 ## Conventions

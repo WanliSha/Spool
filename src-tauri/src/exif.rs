@@ -160,7 +160,8 @@ fn name_to_tag(name: &str, value: &str) -> Option<ExifTag> {
     }
 }
 
-fn read_exif_fields(path: &Path) -> HashMap<String, String> {
+/// Read EXIF fields from file (public for metadata module)
+pub fn read_exif_fields_raw(path: &Path) -> HashMap<String, String> {
     let mut fields = HashMap::new();
 
     let metadata = match Metadata::new_from_path(path) {
@@ -214,6 +215,52 @@ fn read_exif_fields(path: &Path) -> HashMap<String, String> {
     fields
 }
 
+/// Map unified field keys back to EXIF tag names
+fn unified_to_exif(key: &str) -> Option<&str> {
+    match key {
+        "CameraMake" => Some("Make"),
+        "CameraModel" => Some("Model"),
+        "LensMake" => Some("LensMake"),
+        "LensModel" => Some("LensModel"),
+        "Author" => Some("Artist"),
+        "Copyright" => Some("Copyright"),
+        "Description" => Some("ImageDescription"),
+        "DateTaken" => Some("DateTimeOriginal"),
+        "DateCreated" => Some("CreateDate"),
+        "DateModified" => Some("ModifyDate"),
+        "Software" => Some("Software"),
+        "Comment" => Some("UserComment"),
+        "GPSLatitude" => Some("GPSLatitude"),
+        "GPSLongitude" => Some("GPSLongitude"),
+        "GPSLatitudeRef" => Some("GPSLatitudeRef"),
+        "GPSLongitudeRef" => Some("GPSLongitudeRef"),
+        "GPSAltitude" => Some("GPSAltitude"),
+        "ISO" => Some("ISO"),
+        "Aperture" => Some("FNumber"),
+        "ShutterSpeed" => Some("ExposureTime"),
+        "FocalLength" => Some("FocalLength"),
+        "Orientation" => Some("Orientation"),
+        _ => None,
+    }
+}
+
+/// Write EXIF fields to a file using unified field keys
+pub fn write_exif_fields(path: &Path, fields: &HashMap<String, String>) -> Result<(), String> {
+    let mut metadata = Metadata::new_from_path(path).unwrap_or_else(|_| Metadata::new());
+
+    for (unified_key, value) in fields {
+        if let Some(exif_key) = unified_to_exif(unified_key) {
+            if let Some(tag) = name_to_tag(exif_key, value) {
+                metadata.set_tag(tag);
+            }
+        }
+    }
+
+    metadata
+        .write_to_file(path)
+        .map_err(|e| format!("Cannot write EXIF: {e}"))
+}
+
 // === Tauri Commands ===
 
 #[tauri::command]
@@ -223,7 +270,7 @@ pub fn read_exif(path: String, store: State<'_, ExifStore>) -> Result<ExifData, 
         return Err("File not found".to_string());
     }
 
-    let fields = read_exif_fields(file_path);
+    let fields = read_exif_fields_raw(file_path);
     let state = ExifState {
         snapshot: fields.clone(),
         current: fields.clone(),
@@ -254,7 +301,7 @@ pub fn get_exif_batch(paths: Vec<String>, store: State<'_, ExifStore>) -> Result
             if !file_path.exists() {
                 continue;
             }
-            let fields = read_exif_fields(file_path);
+            let fields = read_exif_fields_raw(file_path);
             states.insert(
                 path.clone(),
                 ExifState {

@@ -1,17 +1,20 @@
 # Spool
 
-Cross-platform photo EXIF editor built for film photographers.
+Cross-platform photo metadata editor built for film photographers.
 
 Built with Rust (Tauri) + Svelte + OpenStreetMap.
 
 ## Features
 
-- View and edit EXIF/IPTC/XMP fields
+- View and edit EXIF, XMP, and IPTC metadata — unified interface, no format switching
+- Custom metadata fields via XMP (spool: namespace)
 - Batch edit: modify selected fields across multiple photos
-- Equipment templates: save and reuse camera/lens presets
 - GPS coordinate picker via OpenStreetMap + Leaflet
-- Photo preview: quick and full resolution modes
+- Photo preview: quick and full resolution modes with zoom, pan, rotate
 - RAW format support (CR2, CR3, NEF, ARW, RAF, DNG, and more)
+- Rating (stars), keywords, and location fields
+- Automatic sync across EXIF, XMP, and IPTC on write
+- Light / Dark / System theme
 
 ## License
 

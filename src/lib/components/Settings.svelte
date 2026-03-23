@@ -7,9 +7,11 @@
     recursive_folder_loading: false,
     cache_size_limit_mb: 200,
     theme: "system",
+    custom_fields: [],
   });
   let cacheStats = $state({ size_bytes: 0, file_count: 0 });
   let clearing = $state(false);
+  let newFieldName = $state("");
 
   async function load() {
     try {
@@ -57,6 +59,21 @@
       console.error("Clear cache error:", e);
     }
     clearing = false;
+  }
+
+  async function addCustomField() {
+    const name = newFieldName.trim();
+    if (!name || settings.custom_fields.some((f) => f.name === name)) return;
+    settings.custom_fields = [...settings.custom_fields, { name, field_type: "string" }];
+    newFieldName = "";
+    await save();
+    window.dispatchEvent(new CustomEvent("custom-fields-change"));
+  }
+
+  async function removeCustomField(name) {
+    settings.custom_fields = settings.custom_fields.filter((f) => f.name !== name);
+    await save();
+    window.dispatchEvent(new CustomEvent("custom-fields-change"));
   }
 
   function formatBytes(bytes) {
@@ -130,6 +147,26 @@
           <button type="button" class="clear-btn" onclick={clearCache} disabled={clearing}>
             {clearing ? "Clearing..." : "Clear Cache"}
           </button>
+        </div>
+      </section>
+
+      <section>
+        <h3>Custom Fields</h3>
+        <p class="section-desc">Custom metadata stored in XMP (spool: namespace)</p>
+        {#each settings.custom_fields as cf}
+          <div class="custom-field-row">
+            <span class="custom-field-name">{cf.name}</span>
+            <button type="button" class="remove-field" onclick={() => removeCustomField(cf.name)}>Remove</button>
+          </div>
+        {/each}
+        <div class="add-field-row">
+          <input
+            type="text"
+            placeholder="Field name..."
+            bind:value={newFieldName}
+            onkeydown={(e) => e.key === "Enter" && addCustomField()}
+          />
+          <button type="button" onclick={addCustomField} disabled={!newFieldName.trim()}>Add</button>
         </div>
       </section>
     </div>
@@ -300,6 +337,65 @@
     cursor: not-allowed;
   }
 
+  .section-desc {
+    font-size: 12px;
+    color: #999;
+    margin: 0 0 8px 0;
+  }
+
+  .custom-field-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 0;
+  }
+
+  .custom-field-name {
+    font-size: 14px;
+  }
+
+  .remove-field {
+    font-size: 12px;
+    color: #e53e3e;
+    background: none;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+  }
+
+  .remove-field:hover {
+    border-color: #e53e3e;
+  }
+
+  .add-field-row {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+  }
+
+  .add-field-row input {
+    flex: 1;
+    padding: 4px 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+
+  .add-field-row button {
+    padding: 4px 12px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .add-field-row button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
   :global([data-theme="dark"]) .modal {
     background: #1a1a1a;
   }
@@ -339,5 +435,21 @@
   :global([data-theme="dark"]) .theme-selector label.active {
     border-color: #396cd8;
     background: rgba(57, 108, 216, 0.15);
+  }
+
+  :global([data-theme="dark"]) .add-field-row input {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #f6f6f6;
+  }
+
+  :global([data-theme="dark"]) .add-field-row button {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #f6f6f6;
+  }
+
+  :global([data-theme="dark"]) .remove-field {
+    border-color: #444;
   }
 </style>

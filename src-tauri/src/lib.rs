@@ -1,8 +1,11 @@
 mod decode;
 mod exif;
+mod iptc;
+mod metadata;
 mod preview;
 mod settings;
 mod thumbnail;
+mod xmp;
 
 use serde::Serialize;
 use std::fs;
@@ -78,6 +81,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .manage(exif::ExifStore::new())
+        .manage(metadata::MetadataStore::new())
         .manage(preview::PreviewCache::new())
         .manage(settings::SettingsStore::new())
         .invoke_handler(tauri::generate_handler![
@@ -92,6 +96,13 @@ pub fn run() {
             exif::reset_exif_batch,
             exif::restore_snapshot_batch,
             exif::get_modified_files,
+            metadata::read_metadata,
+            metadata::get_metadata_batch,
+            metadata::update_metadata_batch,
+            metadata::save_metadata_batch,
+            metadata::reset_metadata_batch,
+            metadata::restore_metadata_snapshot_batch,
+            metadata::get_modified_metadata_files,
             preview::get_preview,
             settings::load_settings,
             settings::save_settings,

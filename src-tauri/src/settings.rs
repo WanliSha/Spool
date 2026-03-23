@@ -5,11 +5,24 @@ use std::sync::Mutex;
 use tauri::State;
 
 #[derive(Clone, Serialize, Deserialize)]
+pub struct CustomFieldDef {
+    pub name: String,
+    #[serde(default = "default_field_type")]
+    pub field_type: String,
+}
+
+fn default_field_type() -> String {
+    "string".to_string()
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub recursive_folder_loading: bool,
     pub cache_size_limit_mb: u32,
     #[serde(default = "default_theme")]
     pub theme: String,
+    #[serde(default)]
+    pub custom_fields: Vec<CustomFieldDef>,
 }
 
 fn default_theme() -> String {
@@ -22,6 +35,7 @@ impl Default for AppSettings {
             recursive_folder_loading: false,
             cache_size_limit_mb: 200,
             theme: default_theme(),
+            custom_fields: Vec::new(),
         }
     }
 }

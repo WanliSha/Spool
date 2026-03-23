@@ -1,8 +1,9 @@
 schema: spec-driven
 
 context: |
-  Project: Spool — Cross-platform photo EXIF editor
-  Tech stack: Rust (Tauri backend) + Web frontend + Leaflet.js (OSM)
+  Project: Spool — Cross-platform photo metadata editor (EXIF, XMP, IPTC)
+  Tech stack: Rust (Tauri backend) + Svelte frontend + Leaflet.js (OSM)
+  Metadata: little_exif (EXIF) + custom XMP/IPTC parsers + unified read/write
   Platforms: Windows, Linux, macOS
   License: Dual-licensed (GPLv3 + Commercial)
   Language: Documentation in English, user-facing text TBD

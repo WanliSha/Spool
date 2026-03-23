@@ -42,6 +42,10 @@
     window.addEventListener("theme-change", (e) => {
       applyTheme(e.detail);
     });
+
+    // Load custom fields
+    await loadCustomFields();
+    window.addEventListener("custom-fields-change", () => loadCustomFields());
   });
 
   // === State ===
@@ -57,12 +61,26 @@
   let undoStack = $state([]);
   let mapSavedVersion = $state(0);
   let showSettings = $state(false);
+  let customFields = $state([]); // [{name, key}]
   let showPreview = $state(true);
   let showEditor = $state(true);
   let showMap = $state(true);
   let fileListWidth = $state(250); // pixels
   let previewHeight = $state(50); // percentage of right area
   let editorWidth = $state(50);   // percentage of bottom area
+
+  // === Custom Fields ===
+  async function loadCustomFields() {
+    try {
+      const settings = await invoke("load_settings");
+      customFields = (settings.custom_fields || []).map((f) => ({
+        name: f.name,
+        key: `spool:${f.name}`,
+      }));
+    } catch (e) {
+      customFields = [];
+    }
+  }
 
   // === File Import ===
   async function loadThumbnail(path) {
@@ -191,7 +209,7 @@
 
     // Load EXIF for all selected files
     try {
-      const dataList = await invoke("get_exif_batch", { paths });
+      const dataList = await invoke("get_metadata_batch", { paths });
       const newCache = { ...exifCache };
       for (const d of dataList) {
         newCache[d.path] = d;
@@ -243,7 +261,7 @@
     undoStack = [...undoStack, { type: "edit", files: paths, field, previousValues }];
 
     try {
-      const results = await invoke("update_exif_batch", {
+      const results = await invoke("update_metadata_batch", {
         request: { paths, field, value },
       });
       const newCache = { ...exifCache };
@@ -284,7 +302,7 @@
       // Restore previous values for each file
       for (const [path, prevValue] of Object.entries(entry.previousValues)) {
         try {
-          await invoke("update_exif_batch", {
+          await invoke("update_metadata_batch", {
             request: {
               paths: [path],
               field: entry.field,
@@ -302,7 +320,7 @@
         snapshot,
       }));
       try {
-        await invoke("restore_snapshot_batch", { entries });
+        await invoke("restore_metadata_snapshot_batch", { entries });
       } catch (e) {
         console.error("Undo save error:", e);
       }
@@ -310,7 +328,7 @@
 
     // Refresh modified files list
     try {
-      const modified = await invoke("get_modified_files");
+      const modified = await invoke("get_modified_metadata_files");
       modifiedFiles = new Set(modified);
     } catch (e) {
       console.error("Get modified error:", e);
@@ -325,7 +343,7 @@
     if (paths.length === 0) return;
 
     try {
-      const results = await invoke("reset_exif_batch", { paths });
+      const results = await invoke("reset_metadata_batch", { paths });
       const newCache = { ...exifCache };
       const newModified = new Set(modifiedFiles);
       for (const d of results) {
@@ -355,7 +373,7 @@
     }
 
     try {
-      const results = await invoke("save_exif_batch", { paths });
+      const results = await invoke("save_metadata_batch", { paths });
       const newCache = { ...exifCache };
       const newModified = new Set(modifiedFiles);
       for (const d of results) {
@@ -601,45 +619,80 @@
     return [...selectedPaths].some((p) => modifiedFiles.has(p));
   }
 
-  const FIELD_LABELS = {
-    Make: "Camera Make",
-    Model: "Camera Model",
-    LensMake: "Lens Make",
-    LensModel: "Lens Model",
-    LensInfo: "Lens Info",
-    Software: "Software",
-    Artist: "Artist",
-    Copyright: "Copyright",
-    ImageDescription: "Description",
-    DateTimeOriginal: "Date Taken",
-    CreateDate: "Date Created",
-    ModifyDate: "Date Modified",
-    ISO: "ISO",
-    FNumber: "Aperture",
-    ExposureTime: "Shutter Speed",
-    FocalLength: "Focal Length",
-    FocalLengthIn35mmFormat: "Focal Length (35mm)",
-    ExposureProgram: "Exposure Program",
-    MeteringMode: "Metering Mode",
-    Flash: "Flash",
-    WhiteBalance: "White Balance",
-    ImageWidth: "Width",
-    ImageHeight: "Height",
-    Orientation: "Orientation",
-    GPSLatitudeRef: "GPS Lat Ref",
-    GPSLatitude: "GPS Latitude",
-    GPSLongitudeRef: "GPS Lng Ref",
-    GPSLongitude: "GPS Longitude",
-    GPSAltitudeRef: "GPS Alt Ref",
-    GPSAltitude: "GPS Altitude",
-    UserComment: "Comment",
-  };
-
-  const EDITABLE_FIELDS = [
-    "Make", "Model", "LensMake", "LensModel", "Software", "Artist", "Copyright",
-    "ImageDescription", "DateTimeOriginal", "CreateDate", "ModifyDate",
-    "GPSLatitudeRef", "GPSLongitudeRef", "UserComment",
+  const FIELD_SECTIONS = [
+    { name: "Camera & Lens", fields: [
+      { key: "CameraMake", label: "Camera Make", editable: true },
+      { key: "CameraModel", label: "Camera Model", editable: true },
+      { key: "LensMake", label: "Lens Make", editable: true },
+      { key: "LensModel", label: "Lens Model", editable: true },
+      { key: "LensInfo", label: "Lens Info", editable: true },
+      { key: "FocalLength", label: "Focal Length", editable: true },
+      { key: "FocalLength35mm", label: "Focal Length (35mm)", editable: true },
+    ]},
+    { name: "Exposure", fields: [
+      { key: "ISO", label: "ISO", editable: true },
+      { key: "Aperture", label: "Aperture", editable: true },
+      { key: "ShutterSpeed", label: "Shutter Speed", editable: true },
+      { key: "ExposureProgram", label: "Exposure Program", editable: true },
+      { key: "MeteringMode", label: "Metering Mode", editable: true },
+      { key: "Flash", label: "Flash", editable: true },
+      { key: "WhiteBalance", label: "White Balance", editable: true },
+    ]},
+    { name: "Description", fields: [
+      { key: "Title", label: "Title", editable: true },
+      { key: "Description", label: "Description", editable: true },
+      { key: "Keywords", label: "Keywords", editable: true },
+    ]},
+    { name: "People & Rights", fields: [
+      { key: "Author", label: "Author", editable: true },
+      { key: "AuthorTitle", label: "Author Title", editable: true },
+      { key: "Copyright", label: "Copyright", editable: true },
+      { key: "Credit", label: "Credit", editable: true },
+      { key: "Source", label: "Source", editable: true },
+    ]},
+    { name: "Dates", fields: [
+      { key: "DateTaken", label: "Date Taken", editable: true },
+      { key: "DateCreated", label: "Date Created", editable: true },
+      { key: "DateModified", label: "Date Modified", editable: true },
+    ]},
+    { name: "Image", fields: [
+      { key: "Width", label: "Width", editable: true },
+      { key: "Height", label: "Height", editable: true },
+      { key: "Orientation", label: "Orientation", editable: true },
+    ]},
+    { name: "GPS", fields: [
+      { key: "GPSLatitude", label: "Latitude", editable: true },
+      { key: "GPSLongitude", label: "Longitude", editable: true },
+      { key: "GPSLatitudeRef", label: "Lat Ref", editable: true },
+      { key: "GPSLongitudeRef", label: "Lng Ref", editable: true },
+      { key: "GPSAltitude", label: "Altitude", editable: true },
+    ]},
+    { name: "Location", fields: [
+      { key: "City", label: "City", editable: true },
+      { key: "State", label: "State/Province", editable: true },
+      { key: "Country", label: "Country", editable: true },
+      { key: "CountryCode", label: "Country Code", editable: true },
+    ]},
+    { name: "Rating", fields: [
+      { key: "Rating", label: "Rating", editable: true },
+      { key: "Label", label: "Label", editable: true },
+    ]},
+    { name: "Other", fields: [
+      { key: "Software", label: "Software", editable: true },
+      { key: "Comment", label: "Comment", editable: true },
+      { key: "Instructions", label: "Instructions", editable: true },
+    ]},
   ];
+
+  // Build flat FIELD_LABELS and EDITABLE_FIELDS from sections for compatibility
+  const FIELD_LABELS = {};
+  const EDITABLE_FIELDS = [];
+  for (const section of FIELD_SECTIONS) {
+    for (const f of section.fields) {
+      FIELD_LABELS[f.key] = f.label;
+      if (f.editable) EDITABLE_FIELDS.push(f.key);
+    }
+  }
 
   getCurrentWindow().onDragDropEvent((event) => {
     if (event.payload.type === "over") {
@@ -781,27 +834,66 @@
                     </div>
                   </div>
                   <div class="panel-content editor-scroll">
-                    {#each Object.entries(FIELD_LABELS) as [field, label]}
-                      <div class="field-row">
-                        <label for={field}>{label}</label>
-                        {#if EDITABLE_FIELDS.includes(field)}
-                          <input
-                            id={field}
-                            value={getDisplayValue(field)}
-                            placeholder={getPlaceholder(field)}
-                            onchange={(e) => updateField(field, e.target.value)}
-                          />
-                        {:else}
-                          <span class="field-value">
-                            {mergedFields[field] === "__MIXED__" ? "Mixed" : mergedFields[field] || "—"}
-                          </span>
-                        {/if}
-                        {#if dirtyFields.has(field)}
-                          <span class="dirty-dot"></span>
-                          <button type="button" class="field-reset" onclick={() => resetField(field)} title="Reset field">✕</button>
-                        {/if}
+                    {#each FIELD_SECTIONS as section}
+                      <div class="field-section">
+                        <h4 class="section-title">{section.name}</h4>
+                        {#each section.fields as f}
+                          <div class="field-row">
+                            <label for={f.key}>{f.label}</label>
+                            {#if f.key === "Rating"}
+                              <div class="rating-widget">
+                                {#each [1,2,3,4,5] as star}
+                                  <button
+                                    type="button"
+                                    class="star"
+                                    class:filled={parseInt(getDisplayValue("Rating") || "0") >= star}
+                                    onclick={() => updateField("Rating", String(star))}
+                                  >&#9733;</button>
+                                {/each}
+                                {#if getDisplayValue("Rating")}
+                                  <button type="button" class="star-clear" onclick={() => updateField("Rating", "")}>&#10005;</button>
+                                {/if}
+                              </div>
+                            {:else if f.editable}
+                              <input
+                                id={f.key}
+                                value={getDisplayValue(f.key)}
+                                placeholder={getPlaceholder(f.key)}
+                                onchange={(e) => updateField(f.key, e.target.value)}
+                              />
+                            {:else}
+                              <span class="field-value">
+                                {mergedFields[f.key] === "__MIXED__" ? "Mixed" : mergedFields[f.key] || "—"}
+                              </span>
+                            {/if}
+                            {#if dirtyFields.has(f.key)}
+                              <span class="dirty-dot"></span>
+                              <button type="button" class="field-reset" onclick={() => resetField(f.key)} title="Reset field">✕</button>
+                            {/if}
+                          </div>
+                        {/each}
                       </div>
                     {/each}
+                    {#if customFields.length > 0}
+                      <div class="field-section">
+                        <h4 class="section-title">Custom</h4>
+                        {#each customFields as cf}
+                          <div class="field-row">
+                            <label for={cf.key}>{cf.name}</label>
+                            <input
+                              id={cf.key}
+                              value={getDisplayValue(cf.key)}
+                              placeholder={getPlaceholder(cf.key)}
+                              onchange={(e) => updateField(cf.key, e.target.value)}
+                            />
+                            {#if dirtyFields.has(cf.key)}
+                              <span class="dirty-dot"></span>
+                              <button type="button" class="field-reset" onclick={() => resetField(cf.key)} title="Reset field">✕</button>
+                            {/if}
+                          </div>
+                        {/each}
+                      </div>
+                    {/if}
                   </div>
                 </div>
               {/if}
@@ -1219,6 +1311,25 @@
     border-color: #396cd8;
   }
 
+  .field-section {
+    margin-bottom: 8px;
+  }
+
+  .section-title {
+    margin: 8px 0 4px 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #eee;
+  }
+
+  .field-section:first-child .section-title {
+    margin-top: 0;
+  }
+
   .field-row {
     display: flex;
     align-items: center;
@@ -1257,6 +1368,39 @@
     flex: 1;
     font-size: 13px;
     color: #333;
+  }
+
+  .rating-widget {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .star {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #ccc;
+    padding: 0 1px;
+    line-height: 1;
+  }
+
+  .star.filled {
+    color: #f59e0b;
+  }
+
+  .star:hover {
+    color: #f59e0b;
+  }
+
+  .star-clear {
+    background: none;
+    border: none;
+    font-size: 12px;
+    cursor: pointer;
+    color: #999;
+    padding: 0 4px;
   }
 
   .dirty-dot {
@@ -1348,6 +1492,11 @@
   :global([data-theme="dark"]) .v-splitter,
   :global([data-theme="dark"]) .list-splitter {
     background: #333;
+  }
+
+  :global([data-theme="dark"]) .section-title {
+    color: #666;
+    border-bottom-color: #333;
   }
 
   :global([data-theme="dark"]) .field-row label {
