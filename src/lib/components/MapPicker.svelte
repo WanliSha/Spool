@@ -330,7 +330,8 @@
   .map-inline {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
   }
 
@@ -370,6 +371,7 @@
     gap: 4px;
     padding: 6px;
     border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
   }
 
   .map-toolbar input {
@@ -437,6 +439,7 @@
     padding: 4px 8px;
     border-top: 1px solid #e0e0e0;
     font-size: 11px;
+    flex-shrink: 0;
   }
 
   .legend {

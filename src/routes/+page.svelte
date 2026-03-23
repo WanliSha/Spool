@@ -733,10 +733,6 @@
     <div class="toolbar">
       <span class="file-count">{files.length} file{files.length !== 1 ? "s" : ""}</span>
       <div class="toolbar-buttons">
-        <button onclick={selectAll}>Select All</button>
-        <button onclick={deselectAll}>Deselect</button>
-        <button onclick={openFiles}>Add Files</button>
-        <button onclick={openFolder}>Add Folder</button>
         <button class="panel-toggle" class:active={showPreview} onclick={() => showPreview = !showPreview}>Preview</button>
         <button class="panel-toggle" class:active={showEditor} onclick={() => showEditor = !showEditor}>Editor</button>
         <button class="panel-toggle" class:active={showMap} onclick={() => showMap = !showMap}>Map</button>
@@ -745,7 +741,14 @@
       </div>
     </div>
     <div class="main-content">
-      <div class="file-list" class:dragging style="width: {fileListWidth}px;">
+      <div class="file-list-area" style="width: {fileListWidth}px;">
+        <div class="file-list-toolbar">
+          <button onclick={selectAll}>All</button>
+          <button onclick={deselectAll}>None</button>
+          <button onclick={openFiles}>+ Files</button>
+          <button onclick={openFolder}>+ Folder</button>
+        </div>
+        <div class="file-list" class:dragging>
         {#each files as file, index}
           <button
             type="button"
@@ -781,6 +784,7 @@
             </div>
           </button>
         {/each}
+        </div>
       </div>
 
       <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1058,9 +1062,28 @@
     overflow: hidden;
   }
 
+  .file-list-area {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+
+  .file-list-toolbar {
+    display: flex;
+    gap: 4px;
+    padding: 6px 8px;
+    border-bottom: 1px solid #e0e0e0;
+    flex-shrink: 0;
+  }
+
+  .file-list-toolbar button {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+
   .file-list {
     overflow-y: auto;
-    flex-shrink: 0;
+    flex: 1;
   }
 
   .list-splitter {
@@ -1251,6 +1274,9 @@
   .panel-content {
     flex: 1;
     overflow: hidden;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
   }
 
   .editor-scroll {
@@ -1260,22 +1286,23 @@
 
   .bottom-area {
     display: flex;
-    flex-shrink: 0;
+    flex: 1;
     min-height: 0;
+    overflow: hidden;
   }
 
   .editor-panel {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    flex-shrink: 0;
+    min-height: 0;
   }
 
   .map-panel {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    flex-shrink: 0;
+    min-height: 0;
   }
 
   .h-splitter {
@@ -1446,6 +1473,10 @@
   }
 
   :global([data-theme="dark"]) .toolbar {
+    border-bottom-color: #333;
+  }
+
+  :global([data-theme="dark"]) .file-list-toolbar {
     border-bottom-color: #333;
   }
 
