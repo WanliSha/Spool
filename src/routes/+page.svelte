@@ -5,15 +5,21 @@
   import MapPicker from "$lib/components/MapPicker.svelte";
   import Settings from "$lib/components/Settings.svelte";
 
+  // === State ===
   let files = $state([]);
   let thumbnails = $state({});
   let dragging = $state(false);
-  let selectedFile = $state(null);
-  let exifData = $state(null);
+  let selectedPaths = $state(new Set());
+  let exifCache = $state({}); // path -> ExifData
   let modifiedFiles = $state(new Set());
+  let dirtyFields = $state(new Set());
+  let mergedFields = $state({});
+  let mergedSnapshot = $state({});
+  let undoStack = $state([]);
   let mapSavedVersion = $state(0);
   let showSettings = $state(false);
 
+  // === File Import ===
   async function loadThumbnail(path) {
     if (thumbnails[path]) return;
     try {
@@ -60,109 +66,276 @@
   }
 
   function clearFiles() {
+    if (modifiedFiles.size > 0) {
+      if (!confirm("You have unsaved changes. Discard them?")) return;
+    }
     files = [];
-    selectedFile = null;
-    exifData = null;
+    selectedPaths = new Set();
+    exifCache = {};
     modifiedFiles = new Set();
+    dirtyFields = new Set();
+    mergedFields = {};
+    mergedSnapshot = {};
+    undoStack = [];
   }
 
-  async function selectFile(file) {
-    selectedFile = file;
-    try {
-      exifData = await invoke("read_exif", { path: file.path });
-    } catch (e) {
-      console.error("Read EXIF error:", e);
-      exifData = { fields: {}, modified: false };
-    }
-  }
-
-  async function updateField(field, value) {
-    if (!selectedFile) return;
-    try {
-      exifData = await invoke("update_exif", {
-        request: { path: selectedFile.path, field, value },
-      });
-      if (exifData.modified) {
-        modifiedFiles = new Set([...modifiedFiles, selectedFile.path]);
+  // === Selection ===
+  function selectFile(file, event) {
+    if (event.metaKey || event.ctrlKey) {
+      // Toggle selection
+      const next = new Set(selectedPaths);
+      if (next.has(file.path)) {
+        next.delete(file.path);
       } else {
-        const next = new Set(modifiedFiles);
-        next.delete(selectedFile.path);
-        modifiedFiles = next;
+        next.add(file.path);
       }
+      selectedPaths = next;
+    } else if (event.shiftKey && selectedPaths.size > 0) {
+      // Range selection
+      const lastSelected = [...selectedPaths].pop();
+      const lastIdx = files.findIndex((f) => f.path === lastSelected);
+      const curIdx = files.findIndex((f) => f.path === file.path);
+      const [start, end] = lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
+      const next = new Set(selectedPaths);
+      for (let i = start; i <= end; i++) {
+        next.add(files[i].path);
+      }
+      selectedPaths = next;
+    } else {
+      // Single select
+      selectedPaths = new Set([file.path]);
+    }
+    dirtyFields = new Set();
+    refreshMergedFields();
+  }
+
+  function selectAll() {
+    selectedPaths = new Set(files.map((f) => f.path));
+    dirtyFields = new Set();
+    refreshMergedFields();
+  }
+
+  function deselectAll() {
+    selectedPaths = new Set();
+    dirtyFields = new Set();
+    mergedFields = {};
+    mergedSnapshot = {};
+  }
+
+  function toggleCheckbox(path, event) {
+    event.stopPropagation();
+    const next = new Set(selectedPaths);
+    if (next.has(path)) {
+      next.delete(path);
+    } else {
+      next.add(path);
+    }
+    selectedPaths = next;
+    dirtyFields = new Set();
+    refreshMergedFields();
+  }
+
+  // === EXIF Merged Fields ===
+  async function refreshMergedFields() {
+    const paths = [...selectedPaths];
+    if (paths.length === 0) {
+      mergedFields = {};
+      mergedSnapshot = {};
+      return;
+    }
+
+    // Load EXIF for all selected files
+    try {
+      const dataList = await invoke("get_exif_batch", { paths });
+      const newCache = { ...exifCache };
+      for (const d of dataList) {
+        newCache[d.path] = d;
+        if (d.modified) {
+          modifiedFiles = new Set([...modifiedFiles, d.path]);
+        }
+      }
+      exifCache = newCache;
+
+      // Compute merged fields
+      const merged = {};
+      const snapshot = {};
+      for (const field of Object.keys(FIELD_LABELS)) {
+        const values = dataList.map((d) => d.fields[field] || "");
+        const unique = [...new Set(values)];
+        if (unique.length === 1) {
+          merged[field] = unique[0];
+        } else {
+          merged[field] = "__MIXED__";
+        }
+
+        const snapValues = dataList.map((d) => d.snapshot[field] || "");
+        const uniqueSnap = [...new Set(snapValues)];
+        if (uniqueSnap.length === 1) {
+          snapshot[field] = uniqueSnap[0];
+        } else {
+          snapshot[field] = "__MIXED__";
+        }
+      }
+      mergedFields = merged;
+      mergedSnapshot = snapshot;
     } catch (e) {
-      console.error("Update EXIF error:", e);
+      console.error("Load EXIF batch error:", e);
     }
   }
 
+  // === Edit ===
+  async function updateField(field, value) {
+    const paths = [...selectedPaths];
+    if (paths.length === 0) return;
+
+    // Save previous values for undo
+    const previousValues = {};
+    for (const p of paths) {
+      previousValues[p] = exifCache[p]?.fields[field] || null;
+    }
+
+    // Push to undo stack
+    undoStack = [...undoStack, { type: "edit", files: paths, field, previousValues }];
+
+    try {
+      const results = await invoke("update_exif_batch", {
+        request: { paths, field, value },
+      });
+      const newCache = { ...exifCache };
+      const newModified = new Set(modifiedFiles);
+      for (const d of results) {
+        newCache[d.path] = d;
+        if (d.modified) {
+          newModified.add(d.path);
+        } else {
+          newModified.delete(d.path);
+        }
+      }
+      exifCache = newCache;
+      modifiedFiles = newModified;
+    } catch (e) {
+      console.error("Update batch error:", e);
+    }
+
+    dirtyFields = new Set([...dirtyFields, field]);
+    refreshMergedFields();
+  }
+
+  function resetField(field) {
+    dirtyFields = new Set([...dirtyFields].filter((f) => f !== field));
+    // Undo the field change by restoring previous values
+    // Just recompute merged from cache
+    refreshMergedFields();
+  }
+
+  // === Undo ===
   async function undo() {
-    if (!selectedFile) return;
-    try {
-      exifData = await invoke("undo_exif", { path: selectedFile.path });
-      if (!exifData.modified) {
-        const next = new Set(modifiedFiles);
-        next.delete(selectedFile.path);
-        modifiedFiles = next;
+    if (undoStack.length === 0) return;
+
+    const entry = undoStack[undoStack.length - 1];
+    undoStack = undoStack.slice(0, -1);
+
+    if (entry.type === "edit") {
+      // Restore previous values for each file
+      for (const [path, prevValue] of Object.entries(entry.previousValues)) {
+        try {
+          await invoke("update_exif_batch", {
+            request: {
+              paths: [path],
+              field: entry.field,
+              value: prevValue || "",
+            },
+          });
+        } catch (e) {
+          console.error("Undo error:", e);
+        }
       }
-    } catch (e) {
-      console.error("Undo error:", e);
+    } else if (entry.type === "save") {
+      // Restore previous snapshots
+      const entries = Object.entries(entry.previousSnapshots).map(([path, snapshot]) => ({
+        path,
+        snapshot,
+      }));
+      try {
+        await invoke("restore_snapshot_batch", { entries });
+      } catch (e) {
+        console.error("Undo save error:", e);
+      }
     }
+
+    // Refresh modified files list
+    try {
+      const modified = await invoke("get_modified_files");
+      modifiedFiles = new Set(modified);
+    } catch (e) {
+      console.error("Get modified error:", e);
+    }
+
+    refreshMergedFields();
   }
 
+  // === Reset ===
   async function reset() {
-    if (!selectedFile) return;
+    const paths = [...selectedPaths];
+    if (paths.length === 0) return;
+
     try {
-      exifData = await invoke("reset_exif", { path: selectedFile.path });
-      const next = new Set(modifiedFiles);
-      next.delete(selectedFile.path);
-      modifiedFiles = next;
+      const results = await invoke("reset_exif_batch", { paths });
+      const newCache = { ...exifCache };
+      const newModified = new Set(modifiedFiles);
+      for (const d of results) {
+        newCache[d.path] = d;
+        newModified.delete(d.path);
+      }
+      exifCache = newCache;
+      modifiedFiles = newModified;
+      dirtyFields = new Set();
+      refreshMergedFields();
     } catch (e) {
       console.error("Reset error:", e);
     }
   }
 
-  async function resetAll() {
-    try {
-      const affected = await invoke("reset_all_exif");
-      modifiedFiles = new Set();
-      if (selectedFile) {
-        exifData = await invoke("read_exif", { path: selectedFile.path });
-      }
-    } catch (e) {
-      console.error("Reset all error:", e);
-    }
-  }
-
+  // === Save ===
   async function save() {
-    if (!selectedFile) return;
+    const paths = [...selectedPaths].filter((p) => modifiedFiles.has(p));
+    if (paths.length === 0) return;
+
+    // Save previous snapshots for undo
+    const previousSnapshots = {};
+    for (const p of paths) {
+      if (exifCache[p]) {
+        previousSnapshots[p] = { ...exifCache[p].snapshot };
+      }
+    }
+
     try {
-      exifData = await invoke("save_exif", { path: selectedFile.path });
-      const next = new Set(modifiedFiles);
-      next.delete(selectedFile.path);
-      modifiedFiles = next;
+      const results = await invoke("save_exif_batch", { paths });
+      const newCache = { ...exifCache };
+      const newModified = new Set(modifiedFiles);
+      for (const d of results) {
+        newCache[d.path] = d;
+        newModified.delete(d.path);
+      }
+      exifCache = newCache;
+      modifiedFiles = newModified;
+
+      undoStack = [...undoStack, { type: "save", files: paths, previousSnapshots }];
+      dirtyFields = new Set();
       mapSavedVersion++;
+      refreshMergedFields();
     } catch (e) {
       console.error("Save error:", e);
     }
   }
 
-  async function saveAll() {
-    try {
-      await invoke("save_all_exif");
-      modifiedFiles = new Set();
-      if (selectedFile) {
-        // Re-read from in-memory state (not file) to get updated snapshot
-        exifData = await invoke("save_exif", { path: selectedFile.path });
-        mapSavedVersion++;
-      }
-    } catch (e) {
-      console.error("Save all error:", e);
+  // === Map ===
+  function getSavedGps() {
+    const snap = mergedSnapshot;
+    if (!snap || snap.GPSLatitude === "__MIXED__" || snap.GPSLongitude === "__MIXED__") {
+      return { lat: null, lng: null };
     }
-  }
-
-  function formatSize(bytes) {
-    if (bytes < 1024) return bytes + " B";
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    return parseGps(snap);
   }
 
   function parseGps(fields) {
@@ -180,12 +353,8 @@
     return { lat, lng };
   }
 
-  function getSavedGps() {
-    return parseGps(exifData?.snapshot);
-  }
-
   async function handleMapChange({ lat, lng }) {
-    if (!selectedFile) return;
+    if (selectedPaths.size === 0) return;
     const latRef = lat >= 0 ? "N" : "S";
     const lngRef = lng >= 0 ? "E" : "W";
     const absLat = Math.abs(lat).toString();
@@ -196,6 +365,80 @@
     await updateField("GPSLongitudeRef", lngRef);
   }
 
+  // === Drag Reorder ===
+  let reorderFrom = $state(null);
+  let reorderTo = $state(null);
+  let ghostEl = null;
+
+  function handleReorderStart(event, index) {
+    event.preventDefault();
+    event.stopPropagation();
+    reorderFrom = index;
+
+    // Create ghost element
+    const file = files[index];
+    ghostEl = document.createElement("div");
+    ghostEl.className = "drag-ghost";
+    const thumbSrc = thumbnails[file.path];
+    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const bgColor = isDark ? "rgba(42,42,42,0.9)" : "rgba(255,255,255,0.9)";
+    const textColor = isDark ? "#f6f6f6" : "#0f0f0f";
+    ghostEl.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;background:${bgColor};color:${textColor};border:1px solid #396cd8;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.25);pointer-events:none;font-size:13px;backdrop-filter:blur(4px);">
+        ${thumbSrc ? `<img src="data:image/jpeg;base64,${thumbSrc}" style="width:32px;height:32px;border-radius:3px;object-fit:cover;" />` : ""}
+        <span>${file.filename}</span>
+      </div>
+    `;
+    ghostEl.style.cssText = "position:fixed;z-index:9999;pointer-events:none;";
+    ghostEl.style.left = event.clientX + 12 + "px";
+    ghostEl.style.top = event.clientY - 16 + "px";
+    document.body.appendChild(ghostEl);
+
+    function onMouseMove(e) {
+      // Move ghost
+      if (ghostEl) {
+        ghostEl.style.left = e.clientX + 12 + "px";
+        ghostEl.style.top = e.clientY - 16 + "px";
+      }
+
+      // Find target index
+      const listEl = document.querySelector(".file-list");
+      if (!listEl) return;
+      const items = listEl.querySelectorAll(".file-item");
+      let found = false;
+      for (let i = 0; i < items.length; i++) {
+        const rect = items[i].getBoundingClientRect();
+        if (e.clientY >= rect.top && e.clientY < rect.bottom) {
+          reorderTo = i;
+          found = true;
+          break;
+        }
+      }
+      if (!found) reorderTo = null;
+    }
+
+    function onMouseUp() {
+      if (reorderFrom !== null && reorderTo !== null && reorderFrom !== reorderTo) {
+        const newFiles = [...files];
+        const [moved] = newFiles.splice(reorderFrom, 1);
+        newFiles.splice(reorderTo, 0, moved);
+        files = newFiles;
+      }
+      reorderFrom = null;
+      reorderTo = null;
+      if (ghostEl) {
+        ghostEl.remove();
+        ghostEl = null;
+      }
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    }
+
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+  }
+
+  // === Keyboard ===
   function handleKeydown(event) {
     if ((event.metaKey || event.ctrlKey) && event.key === "z") {
       event.preventDefault();
@@ -209,6 +452,41 @@
       event.preventDefault();
       showSettings = !showSettings;
     }
+    if ((event.metaKey || event.ctrlKey) && event.key === "a" && files.length > 0) {
+      event.preventDefault();
+      selectAll();
+    }
+  }
+
+  // === Helpers ===
+  function formatSize(bytes) {
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  }
+
+  function getDisplayValue(field) {
+    const val = mergedFields[field];
+    if (val === "__MIXED__") return "";
+    return val || "";
+  }
+
+  function getPlaceholder(field) {
+    const val = mergedFields[field];
+    if (val === "__MIXED__") return "Mixed";
+    return "";
+  }
+
+  function hasSelection() {
+    return selectedPaths.size > 0;
+  }
+
+  function isMultiSelect() {
+    return selectedPaths.size > 1;
+  }
+
+  function selectionHasModified() {
+    return [...selectedPaths].some((p) => modifiedFiles.has(p));
   }
 
   const FIELD_LABELS = {
@@ -290,26 +568,35 @@
     <div class="toolbar">
       <span class="file-count">{files.length} file{files.length !== 1 ? "s" : ""}</span>
       <div class="toolbar-buttons">
+        <button onclick={selectAll}>Select All</button>
+        <button onclick={deselectAll}>Deselect</button>
         <button onclick={openFiles}>Add Files</button>
         <button onclick={openFolder}>Add Folder</button>
-        {#if modifiedFiles.size > 0}
-          <button onclick={saveAll}>Save All</button>
-          <button onclick={resetAll}>Reset All</button>
-        {/if}
         <button class="clear" onclick={clearFiles}>Clear</button>
-        <button class="settings-btn" onclick={() => showSettings = true} title="Settings">&#9881;</button>
+        <button class="settings-btn" onclick={() => showSettings = true} title="Settings (Cmd+,)">&#9881;</button>
       </div>
     </div>
     <div class="main-content">
       <div class="file-list" class:dragging>
-        {#each files as file}
+        {#each files as file, index}
           <button
             type="button"
             class="file-item"
-            class:selected={selectedFile?.path === file.path}
+            class:selected={selectedPaths.has(file.path)}
             class:modified={modifiedFiles.has(file.path)}
-            onclick={() => selectFile(file)}
+            class:reorder-target={reorderTo === index && reorderFrom !== null && reorderFrom !== index}
+            class:reorder-source={reorderFrom === index}
+            onclick={(e) => selectFile(file, e)}
           >
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <span class="drag-handle" title="Drag to reorder" onmousedown={(e) => handleReorderStart(e, index)}>≡</span>
+            {#if isMultiSelect()}
+              <input
+                type="checkbox"
+                checked={selectedPaths.has(file.path)}
+                onclick={(e) => toggleCheckbox(file.path, e)}
+              />
+            {/if}
             <div class="file-thumb">
               {#if thumbnails[file.path]}
                 <img src="data:image/jpeg;base64,{thumbnails[file.path]}" alt={file.filename} />
@@ -329,13 +616,19 @@
       </div>
 
       <div class="editor-panel">
-        {#if selectedFile && exifData}
+        {#if hasSelection()}
           <div class="editor-header">
-            <h3>{selectedFile.filename}</h3>
+            <h3>
+              {#if isMultiSelect()}
+                {selectedPaths.size} photos selected
+              {:else}
+                {files.find(f => selectedPaths.has(f.path))?.filename || ""}
+              {/if}
+            </h3>
             <div class="editor-actions">
-              <button onclick={undo} title="Undo (Cmd+Z)">Undo</button>
-              <button onclick={reset}>Reset</button>
-              <button onclick={save} title="Save (Cmd+S)" class:primary={exifData.modified}>Save</button>
+              <button onclick={undo} title="Undo (Cmd+Z)" disabled={undoStack.length === 0}>Undo</button>
+              <button onclick={reset} disabled={!selectionHasModified()}>Reset</button>
+              <button onclick={save} title="Save (Cmd+S)" class:primary={selectionHasModified()} disabled={!selectionHasModified()}>Save</button>
             </div>
           </div>
           <div class="editor-fields">
@@ -345,11 +638,18 @@
                 {#if EDITABLE_FIELDS.includes(field)}
                   <input
                     id={field}
-                    value={exifData.fields[field] || ""}
+                    value={getDisplayValue(field)}
+                    placeholder={getPlaceholder(field)}
                     onchange={(e) => updateField(field, e.target.value)}
                   />
                 {:else}
-                  <span class="field-value">{exifData.fields[field] || "—"}</span>
+                  <span class="field-value">
+                    {mergedFields[field] === "__MIXED__" ? "Mixed" : mergedFields[field] || "—"}
+                  </span>
+                {/if}
+                {#if dirtyFields.has(field)}
+                  <span class="dirty-dot"></span>
+                  <button type="button" class="field-reset" onclick={() => resetField(field)} title="Reset field">✕</button>
                 {/if}
               </div>
             {/each}
@@ -459,6 +759,11 @@
     border-color: #396cd8;
   }
 
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
   button.clear {
     color: #888;
   }
@@ -513,8 +818,8 @@
   .file-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
+    gap: 6px;
+    padding: 6px 8px;
     border-bottom: 1px solid #eee;
     cursor: pointer;
     width: 100%;
@@ -534,6 +839,39 @@
 
   .file-item.selected {
     background: #e8eeff;
+  }
+
+  .file-item.reorder-target {
+    border-top: 2px solid #396cd8;
+  }
+
+  .file-item.reorder-source {
+    background: #e0e0e0;
+  }
+
+  .file-item.reorder-source .file-thumb,
+  .file-item.reorder-source .file-info,
+  .file-item.reorder-source .drag-handle {
+    opacity: 0.3;
+  }
+
+  .drag-handle {
+    cursor: grab;
+    color: #bbb;
+    font-size: 14px;
+    flex-shrink: 0;
+    user-select: none;
+  }
+
+  .drag-handle:active {
+    cursor: grabbing;
+  }
+
+  .file-item input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+    cursor: pointer;
   }
 
   .file-thumb {
@@ -647,6 +985,11 @@
     font-family: inherit;
   }
 
+  .field-row input::placeholder {
+    color: #999;
+    font-style: italic;
+  }
+
   .field-row input:focus {
     outline: none;
     border-color: #396cd8;
@@ -656,6 +999,31 @@
     flex: 1;
     font-size: 13px;
     color: #333;
+  }
+
+  .dirty-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #f59e0b;
+    flex-shrink: 0;
+  }
+
+  .field-reset {
+    padding: 2px 6px;
+    font-size: 11px;
+    border: 1px solid #ddd;
+    background: none;
+    cursor: pointer;
+    color: #888;
+    flex-shrink: 0;
+    border-radius: 3px;
+  }
+
+  .field-reset:hover {
+    color: #e53e3e;
+    border-color: #e53e3e;
   }
 
   .map-section {
@@ -731,8 +1099,21 @@
       color: #f6f6f6;
     }
 
+    .field-row input::placeholder {
+      color: #666;
+    }
+
     .field-value {
       color: #ccc;
+    }
+
+    .field-reset {
+      border-color: #444;
+      color: #888;
+    }
+
+    .drag-handle {
+      color: #555;
     }
 
     .map-section {

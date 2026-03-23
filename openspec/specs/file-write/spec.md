@@ -6,43 +6,68 @@ All edits are staged in-app. Files are only modified when the user explicitly sa
 ## Edit Lifecycle
 
 ```
-Import → Edit in app → Save / Save All (write to file)
-                     → Undo (revert last edit)
-                     → Reset / Reset All (restore to import state)
+Import → Edit in app → Save (write selected files)
+                     → Undo (revert last operation, global stack)
+                     → Reset (discard unsaved changes on selected files)
 ```
 
 ## In-App State
 
 On import, Rust reads and stores an EXIF snapshot per file (in memory). All user edits modify only the in-app state, never the file on disk.
 
-## Single File Operations
+## Selection
 
-### Undo
-- Reverts the last single edit operation on the selected file
-- Standard undo stack per file (Ctrl+Z / Cmd+Z)
+- Single click to select one file
+- Cmd+click to toggle additional files
+- Shift+click to select a range
+- Select All / Deselect All buttons in toolbar
+- Checkbox appears on each file when multi-selected (>=2)
+- Drag handle always visible for reordering within the app
 
-### Reset
-- Restores all fields of the selected file to the state captured at import time
-- Discards entire undo history for that file
+## EXIF Panel (Multi-Select)
 
-### Save
-- Writes the current in-app EXIF state of the selected file to disk
-- Updates the import snapshot to the newly saved state
-- Clears the undo history (saved state becomes the new baseline)
+- All same value → display that value
+- Different values → display "Mixed"
+- All empty → display empty
+- Track which fields the user has **touched** (dirty flag per field)
+- Only touched fields are written on save; untouched fields are skipped
+- Touched field with value → write that value to all selected files
+- Touched field cleared → delete that field from all selected files
+- Visual indicator on edited fields: orange dot (●) + reset button (✕) on the right
 
-## Batch Operations
+## Undo
 
-### Reset All
-- Restores all files to their import-time state
-- Discards undo history for all files
+- Global operation stack (not per-file)
+- Each entry records: affected files, field, previous values
+- Undo restores the previous state of the affected files
+- Save is also recorded in the undo stack
+- Undo save: restores app state to pre-save, marks files as modified (does NOT rewrite the file)
+- Cmd+Z shortcut
 
-### Save All
-- Saves all files that have unsaved modifications
-- Same behaviour as single Save, applied to each modified file
+## Reset
+
+- Discards unsaved changes on selected files
+- Restores to the last saved state (not the import-time state)
+- If file was never saved, restores to import-time state
+
+## Save
+
+- Saves all selected files that have unsaved modifications
+- Writes touched fields to disk
+- Updates snapshot to current state
+- No separate "Save All" — save always operates on selection
 
 ## Unsaved Changes Indicator
-- Files with unsaved modifications should be visually marked in the UI
-- If user closes the app or removes files with unsaved changes, prompt for confirmation
+
+- Files with unsaved modifications visually marked in file list (orange dot)
+- Closing the app or clearing files with unsaved changes prompts confirmation:
+  "You have unsaved changes. Save before closing?" [Save] [Discard] [Cancel]
+
+## Map (Multi-Select)
+
+- All selected files have same GPS → show blue pin (Saved)
+- GPS differs or mixed → no blue pin
+- User selects coordinate (red pin) → applies to all selected files on save
 
 ## Write Method
 - Direct write to original file (modify EXIF header in place)
