@@ -1,15 +1,14 @@
 name: Auto Tag
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
-    paths:
-      - "package.json"
-      - "src-tauri/Cargo.toml"
-      - "src-tauri/tauri.conf.json"
 
 jobs:
   tag:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
