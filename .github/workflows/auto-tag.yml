@@ -39,27 +39,19 @@ jobs:
           fi
           echo "All versions match: ${{ steps.version.outputs.pkg }}"
 
-      - name: Check if version changed
+      - name: Check if tag exists
         id: check
         run: |
-          # Check if tag already exists
           if git rev-parse "v${{ steps.version.outputs.pkg }}" >/dev/null 2>&1; then
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.version.outputs.pkg }} already exists, version not changed"
+            echo "new=false" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.version.outputs.pkg }} already exists"
           else
-            # Check if version files were modified in the triggering commit
-            changed_files=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
-            if echo "$changed_files" | grep -qE "package.json|src-tauri/Cargo.toml|src-tauri/tauri.conf.json"; then
-              echo "changed=true" >> $GITHUB_OUTPUT
-              echo "Version files changed and tag v${{ steps.version.outputs.pkg }} is new"
-            else
-              echo "changed=false" >> $GITHUB_OUTPUT
-              echo "Version files not changed in this commit"
-            fi
+            echo "new=true" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.version.outputs.pkg }} is new"
           fi
 
       - name: Create tag
-        if: steps.check.outputs.changed == 'true'
+        if: steps.check.outputs.new == 'true'
         run: |
           git tag "v${{ steps.version.outputs.pkg }}"
           git push origin "v${{ steps.version.outputs.pkg }}"
