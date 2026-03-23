@@ -38,7 +38,7 @@ fn ensure_cache_dir() -> Result<PathBuf, String> {
 }
 
 fn generate_thumbnail(path: &Path) -> Result<Vec<u8>, String> {
-    let img = image::open(path).map_err(|e| format!("Cannot open image: {e}"))?;
+    let img = crate::decode::decode_thumbnail(path)?;
     let thumbnail = img.resize(THUMBNAIL_SIZE, THUMBNAIL_SIZE, FilterType::Triangle);
     let mut buf = Vec::new();
     let encoder = JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY);

@@ -44,13 +44,11 @@ pub fn get_preview(
         return Err("File not found".to_string());
     }
 
-    let img = image::open(file_path).map_err(|e| format!("Cannot open image: {e}"))?;
-
     let (output, quality) = if mode == "full" {
-        // Full resolution — no resize
+        let img = crate::decode::decode_full(file_path)?;
         (img, FULL_QUALITY)
     } else {
-        // Quick mode — resize to fit within QUICK_SIZE
+        let img = crate::decode::decode_preview(file_path)?;
         let resized = if img.width() > QUICK_SIZE || img.height() > QUICK_SIZE {
             img.resize(QUICK_SIZE, QUICK_SIZE, FilterType::Lanczos3)
         } else {

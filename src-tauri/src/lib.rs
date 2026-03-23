@@ -1,3 +1,4 @@
+mod decode;
 mod exif;
 mod preview;
 mod settings;
