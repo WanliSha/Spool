@@ -3,6 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
   import MapPicker from "$lib/components/MapPicker.svelte";
+  import Settings from "$lib/components/Settings.svelte";
 
   let files = $state([]);
   let thumbnails = $state({});
@@ -11,6 +12,7 @@
   let exifData = $state(null);
   let modifiedFiles = $state(new Set());
   let mapSavedVersion = $state(0);
+  let showSettings = $state(false);
 
   async function loadThumbnail(path) {
     if (thumbnails[path]) return;
@@ -24,7 +26,7 @@
 
   async function importPaths(paths) {
     if (!paths || paths.length === 0) return;
-    const entries = await invoke("scan_paths", { paths, recursive: false });
+    const entries = await invoke("scan_paths", { paths });
     files = [...files, ...entries];
     for (const entry of entries) {
       loadThumbnail(entry.path);
@@ -203,6 +205,10 @@
       event.preventDefault();
       save();
     }
+    if ((event.metaKey || event.ctrlKey) && event.key === ",") {
+      event.preventDefault();
+      showSettings = !showSettings;
+    }
   }
 
   const FIELD_LABELS = {
@@ -264,14 +270,19 @@
 
 <main class="container">
   {#if files.length === 0}
-    <div class="drop-zone" class:dragging>
-      <div class="drop-content">
-        <p class="drop-icon">📂</p>
-        <p class="drop-text">Drag photos or folders here</p>
-        <p class="drop-or">or</p>
-        <div class="buttons">
-          <button onclick={openFiles}>Open Files</button>
-          <button onclick={openFolder}>Open Folder</button>
+    <div class="drop-zone-wrapper">
+      <div class="top-bar">
+        <button class="settings-btn" onclick={() => showSettings = true} title="Settings (Cmd+,)">&#9881;</button>
+      </div>
+      <div class="drop-zone" class:dragging>
+        <div class="drop-content">
+          <p class="drop-icon">📂</p>
+          <p class="drop-text">Drag photos or folders here</p>
+          <p class="drop-or">or</p>
+          <div class="buttons">
+            <button onclick={openFiles}>Open Files</button>
+            <button onclick={openFolder}>Open Folder</button>
+          </div>
         </div>
       </div>
     </div>
@@ -286,6 +297,7 @@
           <button onclick={resetAll}>Reset All</button>
         {/if}
         <button class="clear" onclick={clearFiles}>Clear</button>
+        <button class="settings-btn" onclick={() => showSettings = true} title="Settings">&#9881;</button>
       </div>
     </div>
     <div class="main-content">
@@ -359,6 +371,9 @@
     </div>
   {/if}
 
+  {#if showSettings}
+    <Settings onclose={() => showSettings = false} />
+  {/if}
 </main>
 
 <style>
@@ -374,6 +389,18 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
+  }
+
+  .drop-zone-wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .top-bar {
+    display: flex;
+    justify-content: flex-end;
+    padding: 8px 16px;
   }
 
   .drop-zone {
@@ -434,6 +461,11 @@
 
   button.clear {
     color: #888;
+  }
+
+  .settings-btn {
+    font-size: 16px;
+    padding: 4px 8px;
   }
 
   button.primary {

@@ -1,4 +1,5 @@
 mod exif;
+mod settings;
 mod thumbnail;
 
 use serde::Serialize;
@@ -54,7 +55,12 @@ fn collect_files(path: &Path, recursive: bool, results: &mut Vec<FileEntry>) {
 }
 
 #[tauri::command]
-fn scan_paths(paths: Vec<String>, recursive: bool) -> Vec<FileEntry> {
+fn scan_paths(
+    paths: Vec<String>,
+    recursive: Option<bool>,
+    settings_store: tauri::State<'_, settings::SettingsStore>,
+) -> Vec<FileEntry> {
+    let recursive = recursive.unwrap_or_else(|| settings_store.get_recursive());
     let mut results = Vec::new();
     for p in &paths {
         collect_files(Path::new(p), recursive, &mut results);
@@ -70,6 +76,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .manage(exif::ExifStore::new())
+        .manage(settings::SettingsStore::new())
         .invoke_handler(tauri::generate_handler![
             scan_paths,
             thumbnail::get_thumbnail,
@@ -83,6 +90,8 @@ pub fn run() {
             exif::save_exif,
             exif::save_all_exif,
             exif::get_modified_files,
+            settings::load_settings,
+            settings::save_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
