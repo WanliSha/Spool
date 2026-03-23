@@ -13,7 +13,7 @@ Import → Edit in app → Save (write selected files)
 
 ## In-App State
 
-On import, Rust reads and stores an EXIF snapshot per file (in memory). All user edits modify only the in-app state, never the file on disk.
+On import, Rust reads and stores an metadata snapshot per file (in memory). All user edits modify only the in-app state, never the file on disk.
 
 ## Selection
 
