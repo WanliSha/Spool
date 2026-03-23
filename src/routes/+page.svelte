@@ -482,6 +482,13 @@
     window.addEventListener("mouseup", onMouseUp);
   }
 
+  // === Preview Navigation ===
+  function handlePreviewNavigate(path) {
+    selectedPaths = new Set([path]);
+    dirtyFields = new Set();
+    refreshMergedFields();
+  }
+
   // === Splitters ===
   function startHSplit(e) {
     e.preventDefault();
@@ -718,7 +725,12 @@
                 <button type="button" class="panel-close" onclick={() => showPreview = false}>✕</button>
               </div>
               <div class="panel-content">
-                <PhotoPreview paths={[...selectedPaths]} />
+                <PhotoPreview
+                  allPaths={files.map(f => f.path)}
+                  selectedPaths={[...selectedPaths]}
+                  isMultiSelect={isMultiSelect()}
+                  onnavigate={handlePreviewNavigate}
+                />
               </div>
             </div>
           {/if}

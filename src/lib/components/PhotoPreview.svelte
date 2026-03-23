@@ -1,28 +1,51 @@
 <script>
   import { invoke } from "@tauri-apps/api/core";
 
-  let { paths = [] } = $props();
+  let { allPaths = [], selectedPaths = [], isMultiSelect = false, onnavigate } = $props();
 
   let previews = $state({});
   let zoom = $state(1);
   let panX = $state(0);
   let panY = $state(0);
+  let rotation = $state({});
+  let currentIndex = $state(0);
   let isPanning = $state(false);
   let panStart = { x: 0, y: 0, panX: 0, panY: 0 };
-  let containerEl;
+  let viewEl;
+  let suppressAutoNav = false;
 
+  function getStripPaths() {
+    return isMultiSelect ? selectedPaths : allPaths;
+  }
+
+  // Load previews
   $effect(() => {
-    const newPaths = paths;
-    // Load previews for new paths
-    for (const p of newPaths) {
-      if (!previews[p]) {
-        loadPreview(p);
+    if (isMultiSelect) {
+      for (const p of selectedPaths) {
+        if (p && !previews[p]) loadPreview(p);
+      }
+    } else {
+      const paths = allPaths;
+      for (let i = Math.max(0, currentIndex - 1); i <= Math.min(paths.length - 1, currentIndex + 1); i++) {
+        const p = paths[i];
+        if (p && !previews[p]) loadPreview(p);
       }
     }
-    // Reset zoom/pan when selection changes
-    zoom = 1;
-    panX = 0;
-    panY = 0;
+  });
+
+  // Sync currentIndex when selection changes
+  let lastSelKey = "";
+  $effect(() => {
+    const sel = selectedPaths;
+    const multi = isMultiSelect;
+    const key = JSON.stringify(sel) + multi;
+    if (key === lastSelKey) return;
+    lastSelKey = key;
+    resetView();
+    if (!multi && sel.length === 1) {
+      const idx = allPaths.indexOf(sel[0]);
+      if (idx >= 0) currentIndex = idx;
+    }
   });
 
   async function loadPreview(path) {
@@ -34,11 +57,84 @@
     }
   }
 
+  function resetView() {
+    zoom = 1;
+    panX = 0;
+    panY = 0;
+  }
+
+  function currentPath() {
+    return allPaths[currentIndex] || null;
+  }
+
+  function currentFilename() {
+    const p = currentPath();
+    if (!p) return "";
+    return p.split("/").pop() || p;
+  }
+
+  function positionLabel() {
+    if (isMultiSelect) return `${selectedPaths.length} photos selected`;
+    if (allPaths.length === 0) return "";
+    return `${currentFilename()} (${currentIndex + 1}/${allPaths.length})`;
+  }
+
+  function navigateTo(idx) {
+    const paths = allPaths;
+    if (idx < 0 || idx >= paths.length) return;
+    currentIndex = idx;
+    resetView();
+    suppressAutoNav = true;
+    if (onnavigate && paths[idx]) onnavigate(paths[idx]);
+    setTimeout(() => { suppressAutoNav = false; }, 100);
+    // Preload adjacent
+    for (let i = Math.max(0, idx - 1); i <= Math.min(paths.length - 1, idx + 1); i++) {
+      const p = paths[i];
+      if (p && !previews[p]) loadPreview(p);
+    }
+  }
+
+  function prev() { navigateTo(currentIndex - 1); }
+  function next() { navigateTo(currentIndex + 1); }
+
+  function zoomIn() { applyZoom(1.25, null); }
+  function zoomOut() { applyZoom(0.8, null); }
+
+  function applyZoom(factor, mouseEvent) {
+    const newZoom = Math.max(0.1, Math.min(10, zoom * factor));
+    if (mouseEvent && viewEl) {
+      // Zoom centered on cursor
+      const rect = viewEl.getBoundingClientRect();
+      const mx = mouseEvent.clientX - rect.left;
+      const my = mouseEvent.clientY - rect.top;
+      // Adjust pan to keep the point under cursor stationary
+      const cx = rect.width / 2;
+      const cy = rect.height / 2;
+      const dx = mx - cx;
+      const dy = my - cy;
+      const scale = newZoom / zoom;
+      panX = panX * scale - dx * (scale - 1);
+      panY = panY * scale - dy * (scale - 1);
+    }
+    zoom = newZoom;
+  }
+
+  function rotateCW() {
+    const p = currentPath();
+    if (!p) return;
+    rotation = { ...rotation, [p]: ((rotation[p] || 0) + 90) % 360 };
+  }
+
+  function rotateCCW() {
+    const p = currentPath();
+    if (!p) return;
+    rotation = { ...rotation, [p]: ((rotation[p] || 0) - 90 + 360) % 360 };
+  }
+
   function handleWheel(e) {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    const newZoom = Math.max(0.1, Math.min(10, zoom * delta));
-    zoom = newZoom;
+    const factor = e.deltaY > 0 ? 0.92 : 1.08;
+    applyZoom(factor, e);
   }
 
   function handleMouseDown(e) {
@@ -58,102 +154,212 @@
   }
 
   function handleDblClick() {
-    zoom = 1;
-    panX = 0;
-    panY = 0;
+    resetView();
+  }
+
+  function handleKeydown(e) {
+    if (isMultiSelect) return;
+    if (e.key === "ArrowLeft") { e.preventDefault(); prev(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); next(); }
+  }
+
+  // Auto-layout grid for multi-select
+  function gridStyle() {
+    const count = selectedPaths.length;
+    if (count <= 1) return "";
+    const cols = Math.ceil(Math.sqrt(count));
+    return `grid-template-columns: repeat(${cols}, 1fr);`;
   }
 </script>
 
+<svelte:window onkeydown={handleKeydown} />
+
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-  class="preview-container"
-  bind:this={containerEl}
-  onwheel={handleWheel}
-  onmousedown={handleMouseDown}
-  onmousemove={handleMouseMove}
-  onmouseup={handleMouseUp}
-  onmouseleave={handleMouseUp}
-  ondblclick={handleDblClick}
->
-  {#if paths.length === 0}
-    <div class="preview-empty">No photos selected</div>
-  {:else if paths.length === 1}
-    <div class="single-preview" style="transform: scale({zoom}) translate({panX / zoom}px, {panY / zoom}px);">
-      {#if previews[paths[0]]}
-        <img src="data:image/jpeg;base64,{previews[paths[0]]}" alt="Preview" draggable="false" />
-      {:else}
-        <div class="loading">Loading...</div>
+<div class="preview-wrapper">
+  <div class="preview-toolbar">
+    <div class="nav-group">
+      {#if !isMultiSelect}
+        <button type="button" onclick={prev} disabled={currentIndex === 0}>◀</button>
+      {/if}
+      <span class="position-label">{positionLabel()}</span>
+      {#if !isMultiSelect}
+        <button type="button" onclick={next} disabled={currentIndex >= allPaths.length - 1}>▶</button>
       {/if}
     </div>
-  {:else}
-    <div class="multi-preview" style="transform: scale({zoom}) translate({panX / zoom}px, {panY / zoom}px);">
-      {#each paths as path}
-        <div class="multi-item">
-          {#if previews[path]}
-            <img src="data:image/jpeg;base64,{previews[path]}" alt="Preview" draggable="false" />
-          {:else}
-            <div class="loading">Loading...</div>
-          {/if}
-        </div>
-      {/each}
+    <div class="action-group">
+      <button type="button" onclick={zoomOut}>−</button>
+      <span class="zoom-label">{Math.round(zoom * 100)}%</span>
+      <button type="button" onclick={zoomIn}>+</button>
+      <button type="button" onclick={resetView}>1:1</button>
+      {#if !isMultiSelect}
+        <span class="separator"></span>
+        <button type="button" onclick={rotateCCW} title="Rotate CCW">↺</button>
+        <button type="button" onclick={rotateCW} title="Rotate CW">↻</button>
+      {/if}
     </div>
-  {/if}
+  </div>
+
+  <div
+    class="preview-view"
+    bind:this={viewEl}
+    onwheel={handleWheel}
+    onmousedown={handleMouseDown}
+    onmousemove={handleMouseMove}
+    onmouseup={handleMouseUp}
+    onmouseleave={handleMouseUp}
+    ondblclick={handleDblClick}
+  >
+    {#if isMultiSelect && selectedPaths.length > 0}
+      <div class="zoom-frame" style="transform: translate({panX}px, {panY}px) scale({zoom});">
+        <div class="photo-grid" style={gridStyle()}>
+          {#each selectedPaths as path}
+            <div class="grid-item">
+              {#if previews[path]}
+                <img src="data:image/jpeg;base64,{previews[path]}" alt={path.split("/").pop()} draggable="false" />
+              {:else}
+                <div class="loading">Loading...</div>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </div>
+    {:else if allPaths.length > 0}
+      {@const path = currentPath()}
+      {@const rot = rotation[path] || 0}
+      <div class="zoom-frame" style="transform: translate({panX}px, {panY}px) scale({zoom});">
+        {#if path && previews[path]}
+          <img
+            src="data:image/jpeg;base64,{previews[path]}"
+            alt={path.split("/").pop()}
+            draggable="false"
+            style="transform: rotate({rot}deg);"
+          />
+        {:else}
+          <div class="loading">Loading...</div>
+        {/if}
+      </div>
+    {:else}
+      <div class="preview-empty">No photos to preview</div>
+    {/if}
+  </div>
 </div>
 
 <style>
-  .preview-container {
+  .preview-wrapper {
     width: 100%;
     height: 100%;
+    display: flex;
+    flex-direction: column;
+    background: #111;
+  }
+
+  .preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #333;
+    flex-shrink: 0;
+  }
+
+  .nav-group, .action-group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .preview-toolbar button {
+    background: #2a2a2a;
+    border: 1px solid #444;
+    color: #ccc;
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .preview-toolbar button:hover {
+    background: #3a3a3a;
+    border-color: #666;
+  }
+
+  .preview-toolbar button:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  .position-label {
+    color: #999;
+    font-size: 12px;
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+
+  .zoom-label {
+    color: #999;
+    font-size: 11px;
+    min-width: 36px;
+    text-align: center;
+  }
+
+  .separator {
+    width: 1px;
+    height: 16px;
+    background: #444;
+    margin: 0 4px;
+  }
+
+  .preview-view {
+    flex: 1;
     overflow: hidden;
     cursor: grab;
     display: flex;
     align-items: center;
     justify-content: center;
-    background: #111;
     user-select: none;
+    position: relative;
   }
 
-  .preview-container:active {
+  .preview-view:active {
     cursor: grabbing;
   }
 
-  .preview-empty {
-    color: #666;
-    font-size: 14px;
-  }
-
-  .single-preview {
+  .zoom-frame {
     transform-origin: center center;
-    transition: none;
   }
 
-  .single-preview img {
+  .zoom-frame img {
     max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     display: block;
   }
 
-  .multi-preview {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    transform-origin: center center;
-    transition: none;
-    padding: 0 16px;
+  .photo-grid {
+    display: grid;
+    gap: 4px;
+    padding: 4px;
   }
 
-  .multi-item {
-    flex-shrink: 0;
-    height: 100%;
+  .grid-item {
     display: flex;
     align-items: center;
+    justify-content: center;
+    overflow: hidden;
   }
 
-  .multi-item img {
+  .grid-item img {
+    max-width: 100%;
     max-height: 100%;
     object-fit: contain;
     display: block;
+  }
+
+  .preview-empty {
+    color: #666;
+    font-size: 14px;
   }
 
   .loading {
