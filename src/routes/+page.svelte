@@ -4,6 +4,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
   import MapPicker from "$lib/components/MapPicker.svelte";
+  import PhotoPreview from "$lib/components/PhotoPreview.svelte";
   import Settings from "$lib/components/Settings.svelte";
 
   // === Theme ===
@@ -56,6 +57,11 @@
   let undoStack = $state([]);
   let mapSavedVersion = $state(0);
   let showSettings = $state(false);
+  let showPreview = $state(true);
+  let showEditor = $state(true);
+  let showMap = $state(true);
+  let previewHeight = $state(50); // percentage of right area
+  let editorWidth = $state(50);   // percentage of bottom area
 
   // === File Import ===
   async function loadThumbnail(path) {
@@ -476,6 +482,49 @@
     window.addEventListener("mouseup", onMouseUp);
   }
 
+  // === Splitters ===
+  function startHSplit(e) {
+    e.preventDefault();
+    const rightArea = document.querySelector(".right-area");
+    if (!rightArea) return;
+    const startY = e.clientY;
+    const startHeight = previewHeight;
+    const totalH = rightArea.getBoundingClientRect().height;
+
+    function onMove(ev) {
+      const delta = ev.clientY - startY;
+      const pct = startHeight + (delta / totalH) * 100;
+      previewHeight = Math.max(15, Math.min(85, pct));
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function startVSplit(e) {
+    e.preventDefault();
+    const bottomArea = document.querySelector(".bottom-area");
+    if (!bottomArea) return;
+    const startX = e.clientX;
+    const startWidth = editorWidth;
+    const totalW = bottomArea.getBoundingClientRect().width;
+
+    function onMove(ev) {
+      const delta = ev.clientX - startX;
+      const pct = startWidth + (delta / totalW) * 100;
+      editorWidth = Math.max(20, Math.min(80, pct));
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   // === Keyboard ===
   function handleKeydown(event) {
     if ((event.metaKey || event.ctrlKey) && event.key === "z") {
@@ -610,6 +659,9 @@
         <button onclick={deselectAll}>Deselect</button>
         <button onclick={openFiles}>Add Files</button>
         <button onclick={openFolder}>Add Folder</button>
+        <button class="panel-toggle" class:active={showPreview} onclick={() => showPreview = !showPreview}>Preview</button>
+        <button class="panel-toggle" class:active={showEditor} onclick={() => showEditor = !showEditor}>Editor</button>
+        <button class="panel-toggle" class:active={showMap} onclick={() => showMap = !showMap}>Map</button>
         <button class="clear" onclick={clearFiles}>Clear</button>
         <button class="settings-btn" onclick={() => showSettings = true} title="Settings (Cmd+,)">&#9881;</button>
       </div>
@@ -653,57 +705,97 @@
         {/each}
       </div>
 
-      <div class="editor-panel">
-        {#if hasSelection()}
-          <div class="editor-header">
-            <h3>
-              {#if isMultiSelect()}
-                {selectedPaths.size} photos selected
-              {:else}
-                {files.find(f => selectedPaths.has(f.path))?.filename || ""}
-              {/if}
-            </h3>
-            <div class="editor-actions">
-              <button onclick={undo} title="Undo (Cmd+Z)" disabled={undoStack.length === 0}>Undo</button>
-              <button onclick={reset} disabled={!selectionHasModified()}>Reset</button>
-              <button onclick={save} title="Save (Cmd+S)" class:primary={selectionHasModified()} disabled={!selectionHasModified()}>Save</button>
-            </div>
-          </div>
-          <div class="editor-fields">
-            {#each Object.entries(FIELD_LABELS) as [field, label]}
-              <div class="field-row">
-                <label for={field}>{label}</label>
-                {#if EDITABLE_FIELDS.includes(field)}
-                  <input
-                    id={field}
-                    value={getDisplayValue(field)}
-                    placeholder={getPlaceholder(field)}
-                    onchange={(e) => updateField(field, e.target.value)}
-                  />
-                {:else}
-                  <span class="field-value">
-                    {mergedFields[field] === "__MIXED__" ? "Mixed" : mergedFields[field] || "—"}
-                  </span>
-                {/if}
-                {#if dirtyFields.has(field)}
-                  <span class="dirty-dot"></span>
-                  <button type="button" class="field-reset" onclick={() => resetField(field)} title="Reset field">✕</button>
-                {/if}
-              </div>
-            {/each}
-            <div class="map-section">
-              <MapPicker
-                lat={getSavedGps().lat}
-                lng={getSavedGps().lng}
-                savedVersion={mapSavedVersion}
-                onchange={handleMapChange}
-              />
-            </div>
+      <div class="right-area">
+        {#if !hasSelection()}
+          <div class="no-selection">
+            <p>Select one or more photos to view and edit metadata</p>
           </div>
         {:else}
-          <div class="editor-empty">
-            <p>Select a photo to view and edit EXIF data</p>
-          </div>
+          {#if showPreview}
+            <div class="panel preview-panel" style="height: {(showEditor || showMap) ? previewHeight + '%' : '100%'}">
+              <div class="panel-header">
+                <span>Preview</span>
+                <button type="button" class="panel-close" onclick={() => showPreview = false}>✕</button>
+              </div>
+              <div class="panel-content">
+                <PhotoPreview paths={[...selectedPaths]} />
+              </div>
+            </div>
+          {/if}
+
+          {#if showPreview && (showEditor || showMap)}
+            <!-- svelte-ignore a11y_no_static_element_interactions -->
+            <div class="h-splitter" onmousedown={startHSplit}></div>
+          {/if}
+
+          {#if showEditor || showMap}
+            <div class="bottom-area" style="height: {showPreview ? (100 - previewHeight) + '%' : '100%'}">
+              {#if showEditor}
+                <div class="panel editor-panel" style="width: {showMap ? editorWidth + '%' : '100%'}">
+                  <div class="panel-header">
+                    <span>
+                      {#if isMultiSelect()}
+                        Editor — {selectedPaths.size} photos
+                      {:else}
+                        Editor — {files.find(f => selectedPaths.has(f.path))?.filename || ""}
+                      {/if}
+                    </span>
+                    <div class="panel-header-actions">
+                      <button onclick={undo} title="Undo (Cmd+Z)" disabled={undoStack.length === 0}>Undo</button>
+                      <button onclick={reset} disabled={!selectionHasModified()}>Reset</button>
+                      <button onclick={save} title="Save (Cmd+S)" class:primary={selectionHasModified()} disabled={!selectionHasModified()}>Save</button>
+                      <button type="button" class="panel-close" onclick={() => showEditor = false}>✕</button>
+                    </div>
+                  </div>
+                  <div class="panel-content editor-scroll">
+                    {#each Object.entries(FIELD_LABELS) as [field, label]}
+                      <div class="field-row">
+                        <label for={field}>{label}</label>
+                        {#if EDITABLE_FIELDS.includes(field)}
+                          <input
+                            id={field}
+                            value={getDisplayValue(field)}
+                            placeholder={getPlaceholder(field)}
+                            onchange={(e) => updateField(field, e.target.value)}
+                          />
+                        {:else}
+                          <span class="field-value">
+                            {mergedFields[field] === "__MIXED__" ? "Mixed" : mergedFields[field] || "—"}
+                          </span>
+                        {/if}
+                        {#if dirtyFields.has(field)}
+                          <span class="dirty-dot"></span>
+                          <button type="button" class="field-reset" onclick={() => resetField(field)} title="Reset field">✕</button>
+                        {/if}
+                      </div>
+                    {/each}
+                  </div>
+                </div>
+              {/if}
+
+              {#if showEditor && showMap}
+                <!-- svelte-ignore a11y_no_static_element_interactions -->
+                <div class="v-splitter" onmousedown={startVSplit}></div>
+              {/if}
+
+              {#if showMap}
+                <div class="panel map-panel" style="width: {showEditor ? (100 - editorWidth) + '%' : '100%'}">
+                  <div class="panel-header">
+                    <span>Map</span>
+                    <button type="button" class="panel-close" onclick={() => showMap = false}>✕</button>
+                  </div>
+                  <div class="panel-content">
+                    <MapPicker
+                      lat={getSavedGps().lat}
+                      lng={getSavedGps().lng}
+                      savedVersion={mapSavedVersion}
+                      onchange={handleMapChange}
+                    />
+                  </div>
+                </div>
+              {/if}
+            </div>
+          {/if}
         {/if}
       </div>
     </div>
@@ -963,40 +1055,127 @@
     vertical-align: middle;
   }
 
-  .editor-panel {
+  .right-area {
     flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
   }
 
-  .editor-header {
+  .no-selection {
+    flex: 1;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 8px 16px;
-    border-bottom: 1px solid #e0e0e0;
-  }
-
-  .editor-header h3 {
-    margin: 0;
+    justify-content: center;
+    color: #888;
     font-size: 14px;
-    font-weight: 600;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
-  .editor-actions {
+  .panel {
     display: flex;
-    gap: 6px;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  .preview-panel {
     flex-shrink: 0;
   }
 
-  .editor-fields {
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    border-bottom: 1px solid #e0e0e0;
+    font-size: 12px;
+    font-weight: 600;
+    color: #666;
+    flex-shrink: 0;
+  }
+
+  .panel-header-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+
+  .panel-close {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: #888;
+    font-size: 14px;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+
+  .panel-close:hover {
+    background: #eee;
+    color: #333;
+  }
+
+  .panel-content {
     flex: 1;
+    overflow: hidden;
+  }
+
+  .editor-scroll {
     overflow-y: auto;
-    padding: 8px 16px;
+    padding: 8px 12px;
+  }
+
+  .bottom-area {
+    display: flex;
+    flex-shrink: 0;
+    min-height: 0;
+  }
+
+  .editor-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .map-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+
+  .h-splitter {
+    height: 4px;
+    cursor: row-resize;
+    background: #e0e0e0;
+    flex-shrink: 0;
+  }
+
+  .h-splitter:hover {
+    background: #396cd8;
+  }
+
+  .v-splitter {
+    width: 4px;
+    cursor: col-resize;
+    background: #e0e0e0;
+    flex-shrink: 0;
+  }
+
+  .v-splitter:hover {
+    background: #396cd8;
+  }
+
+  .panel-toggle {
+    font-size: 11px;
+    padding: 3px 8px;
+  }
+
+  .panel-toggle.active {
+    background: #396cd8;
+    color: #fff;
+    border-color: #396cd8;
   }
 
   .field-row {
@@ -1064,19 +1243,6 @@
     border-color: #e53e3e;
   }
 
-  .map-section {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid #eee;
-  }
-
-  .editor-empty {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #888;
-  }
 
   :global([data-theme="dark"]) {
     color: #f6f6f6;
@@ -1123,8 +1289,23 @@
     background: #333;
   }
 
-  :global([data-theme="dark"]) .editor-header {
+  :global([data-theme="dark"]) .panel-header {
     border-bottom-color: #333;
+    color: #999;
+  }
+
+  :global([data-theme="dark"]) .panel-close {
+    color: #666;
+  }
+
+  :global([data-theme="dark"]) .panel-close:hover {
+    background: #333;
+    color: #ccc;
+  }
+
+  :global([data-theme="dark"]) .h-splitter,
+  :global([data-theme="dark"]) .v-splitter {
+    background: #333;
   }
 
   :global([data-theme="dark"]) .field-row label {
@@ -1152,9 +1333,5 @@
 
   :global([data-theme="dark"]) .drag-handle {
     color: #555;
-  }
-
-  :global([data-theme="dark"]) .map-section {
-    border-top-color: #333;
   }
 </style>

@@ -1,4 +1,5 @@
 mod exif;
+mod preview;
 mod settings;
 mod thumbnail;
 
@@ -76,6 +77,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .manage(exif::ExifStore::new())
+        .manage(preview::PreviewCache::new())
         .manage(settings::SettingsStore::new())
         .invoke_handler(tauri::generate_handler![
             scan_paths,
@@ -89,6 +91,7 @@ pub fn run() {
             exif::reset_exif_batch,
             exif::restore_snapshot_batch,
             exif::get_modified_files,
+            preview::get_preview,
             settings::load_settings,
             settings::save_settings,
         ])
