@@ -211,7 +211,14 @@
 
     setTimeout(() => map.invalidateSize(), 200);
 
+    // Resize observer to handle panel resizing
+    const observer = new ResizeObserver(() => {
+      if (map) map.invalidateSize();
+    });
+    if (mapEl) observer.observe(mapEl);
+
     return () => {
+      observer.disconnect();
       map.remove();
     };
   });
@@ -316,18 +323,20 @@
   .map-el {
     width: 100%;
     height: 100%;
+    min-height: 0;
     display: block !important;
   }
 
   .map-inline {
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    height: 100%;
     overflow: hidden;
-    margin-top: 8px;
   }
 
   .map-slot-inline {
-    height: 200px;
+    flex: 1;
+    min-height: 0;
   }
 
   .map-overlay {
@@ -457,9 +466,6 @@
     color: #666;
   }
 
-  :global([data-theme="dark"]) .map-inline {
-    border-color: #333;
-  }
 
   :global([data-theme="dark"]) .map-expanded {
     background: #1a1a1a;

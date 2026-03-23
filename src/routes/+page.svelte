@@ -60,6 +60,7 @@
   let showPreview = $state(true);
   let showEditor = $state(true);
   let showMap = $state(true);
+  let fileListWidth = $state(250); // pixels
   let previewHeight = $state(50); // percentage of right area
   let editorWidth = $state(50);   // percentage of bottom area
 
@@ -490,6 +491,23 @@
   }
 
   // === Splitters ===
+  function startFileListSplit(e) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = fileListWidth;
+
+    function onMove(ev) {
+      const delta = ev.clientX - startX;
+      fileListWidth = Math.max(150, Math.min(500, startWidth + delta));
+    }
+    function onUp() {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   function startHSplit(e) {
     e.preventDefault();
     const rightArea = document.querySelector(".right-area");
@@ -674,7 +692,7 @@
       </div>
     </div>
     <div class="main-content">
-      <div class="file-list" class:dragging>
+      <div class="file-list" class:dragging style="width: {fileListWidth}px;">
         {#each files as file, index}
           <button
             type="button"
@@ -711,6 +729,9 @@
           </button>
         {/each}
       </div>
+
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="list-splitter" onmousedown={startFileListSplit}></div>
 
       <div class="right-area">
         {#if !hasSelection()}
@@ -946,11 +967,19 @@
   }
 
   .file-list {
-    width: 300px;
     overflow-y: auto;
-    border-right: 1px solid #e0e0e0;
     flex-shrink: 0;
-    transition: all 0.2s;
+  }
+
+  .list-splitter {
+    width: 4px;
+    cursor: col-resize;
+    background: #e0e0e0;
+    flex-shrink: 0;
+  }
+
+  .list-splitter:hover {
+    background: #396cd8;
   }
 
   .file-list.dragging {
@@ -1316,7 +1345,8 @@
   }
 
   :global([data-theme="dark"]) .h-splitter,
-  :global([data-theme="dark"]) .v-splitter {
+  :global([data-theme="dark"]) .v-splitter,
+  :global([data-theme="dark"]) .list-splitter {
     background: #333;
   }
 
