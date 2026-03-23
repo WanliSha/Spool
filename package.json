@@ -1,6 +1,6 @@
 {
   "name": "spool",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Cross-platform photo EXIF editor for film photographers",
   "type": "module",
   "scripts": {
