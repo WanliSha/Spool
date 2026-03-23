@@ -8,6 +8,12 @@ use tauri::State;
 pub struct AppSettings {
     pub recursive_folder_loading: bool,
     pub cache_size_limit_mb: u32,
+    #[serde(default = "default_theme")]
+    pub theme: String,
+}
+
+fn default_theme() -> String {
+    "system".to_string()
 }
 
 impl Default for AppSettings {
@@ -15,6 +21,7 @@ impl Default for AppSettings {
         Self {
             recursive_folder_loading: false,
             cache_size_limit_mb: 200,
+            theme: default_theme(),
         }
     }
 }

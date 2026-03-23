@@ -1,9 +1,47 @@
 <script>
+  import { onMount } from "svelte";
   import { invoke } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { open } from "@tauri-apps/plugin-dialog";
   import MapPicker from "$lib/components/MapPicker.svelte";
   import Settings from "$lib/components/Settings.svelte";
+
+  // === Theme ===
+  function applyTheme(theme) {
+    const html = document.documentElement;
+    if (theme === "dark") {
+      html.setAttribute("data-theme", "dark");
+    } else if (theme === "light") {
+      html.setAttribute("data-theme", "light");
+    } else {
+      // system
+      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      html.setAttribute("data-theme", prefersDark ? "dark" : "light");
+    }
+  }
+
+  onMount(async () => {
+    // Load theme from settings on startup
+    try {
+      const settings = await invoke("load_settings");
+      applyTheme(settings.theme || "system");
+    } catch (e) {
+      applyTheme("system");
+    }
+
+    // Listen for OS theme changes (for "system" mode)
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", async () => {
+      try {
+        const settings = await invoke("load_settings");
+        if (settings.theme === "system") applyTheme("system");
+      } catch (_) {}
+    });
+
+    // Listen for theme changes from settings page
+    window.addEventListener("theme-change", (e) => {
+      applyTheme(e.detail);
+    });
+  });
 
   // === State ===
   let files = $state([]);
@@ -380,7 +418,7 @@
     ghostEl = document.createElement("div");
     ghostEl.className = "drag-ghost";
     const thumbSrc = thumbnails[file.path];
-    const isDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
     const bgColor = isDark ? "rgba(42,42,42,0.9)" : "rgba(255,255,255,0.9)";
     const textColor = isDark ? "#f6f6f6" : "#0f0f0f";
     ghostEl.innerHTML = `
@@ -1040,84 +1078,83 @@
     color: #888;
   }
 
-  @media (prefers-color-scheme: dark) {
-    :root {
-      color: #f6f6f6;
-      background-color: #1a1a1a;
-    }
+  :global([data-theme="dark"]) {
+    color: #f6f6f6;
+    background-color: #1a1a1a;
+  }
 
-    button {
-      background: #2a2a2a;
-      border-color: #444;
-      color: #f6f6f6;
-    }
+  :global([data-theme="dark"]) button {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #f6f6f6;
+  }
 
-    button.primary {
-      background: #396cd8;
-      border-color: #396cd8;
-    }
+  :global([data-theme="dark"]) button.primary {
+    background: #396cd8;
+    border-color: #396cd8;
+  }
 
-    .toolbar {
-      border-bottom-color: #333;
-    }
+  :global([data-theme="dark"]) .toolbar {
+    border-bottom-color: #333;
+  }
 
-    .file-list {
-      border-right-color: #333;
-    }
+  :global([data-theme="dark"]) .file-list {
+    border-right-color: #333;
+  }
 
-    .file-item {
-      border-bottom-color: #333;
-    }
+  :global([data-theme="dark"]) .file-item {
+    border-bottom-color: #333;
+  }
 
-    .file-item:hover {
-      background: #2a2a2a;
-    }
+  :global([data-theme="dark"]) .file-item:hover {
+    background: #2a2a2a;
+  }
 
-    .file-item.selected {
-      background: #1e2a4a;
-    }
+  :global([data-theme="dark"]) .file-item.selected {
+    background: #1e2a4a;
+  }
 
-    .drop-zone {
-      border-color: #444;
-    }
+  :global([data-theme="dark"]) .drop-zone {
+    border-color: #444;
+  }
 
-    .file-thumb, .thumb-placeholder {
-      background: #333;
-    }
+  :global([data-theme="dark"]) .file-thumb,
+  :global([data-theme="dark"]) .thumb-placeholder {
+    background: #333;
+  }
 
-    .editor-header {
-      border-bottom-color: #333;
-    }
+  :global([data-theme="dark"]) .editor-header {
+    border-bottom-color: #333;
+  }
 
-    .field-row label {
-      color: #999;
-    }
+  :global([data-theme="dark"]) .field-row label {
+    color: #999;
+  }
 
-    .field-row input {
-      background: #2a2a2a;
-      border-color: #444;
-      color: #f6f6f6;
-    }
+  :global([data-theme="dark"]) .field-row input {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #f6f6f6;
+  }
 
-    .field-row input::placeholder {
-      color: #666;
-    }
+  :global([data-theme="dark"]) .field-row input::placeholder {
+    color: #666;
+  }
 
-    .field-value {
-      color: #ccc;
-    }
+  :global([data-theme="dark"]) .field-value {
+    color: #ccc;
+  }
 
-    .field-reset {
-      border-color: #444;
-      color: #888;
-    }
+  :global([data-theme="dark"]) .field-reset {
+    border-color: #444;
+    color: #888;
+  }
 
-    .drag-handle {
-      color: #555;
-    }
+  :global([data-theme="dark"]) .drag-handle {
+    color: #555;
+  }
 
-    .map-section {
-      border-top-color: #333;
-    }
+  :global([data-theme="dark"]) .map-section {
+    border-top-color: #333;
   }
 </style>

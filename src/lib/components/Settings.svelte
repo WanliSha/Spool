@@ -6,6 +6,7 @@
   let settings = $state({
     recursive_folder_loading: false,
     cache_size_limit_mb: 200,
+    theme: "system",
   });
   let cacheStats = $state({ size_bytes: 0, file_count: 0 });
   let clearing = $state(false);
@@ -25,6 +26,13 @@
     } catch (e) {
       console.error("Save settings error:", e);
     }
+  }
+
+  async function handleThemeChange(e) {
+    settings.theme = e.target.value;
+    await save();
+    // Dispatch event so +page.svelte can apply the theme
+    window.dispatchEvent(new CustomEvent("theme-change", { detail: settings.theme }));
   }
 
   async function handleToggleRecursive() {
@@ -68,6 +76,24 @@
       <button type="button" class="close-btn" onclick={onclose}>✕</button>
     </div>
     <div class="modal-body">
+      <section>
+        <h3>Appearance</h3>
+        <div class="theme-selector">
+          <label class:active={settings.theme === "light"}>
+            <input type="radio" name="theme" value="light" checked={settings.theme === "light"} onchange={handleThemeChange} />
+            Light
+          </label>
+          <label class:active={settings.theme === "dark"}>
+            <input type="radio" name="theme" value="dark" checked={settings.theme === "dark"} onchange={handleThemeChange} />
+            Dark
+          </label>
+          <label class:active={settings.theme === "system"}>
+            <input type="radio" name="theme" value="system" checked={settings.theme === "system"} onchange={handleThemeChange} />
+            System
+          </label>
+        </div>
+      </section>
+
       <section>
         <h3>File Import</h3>
         <label class="toggle-row">
@@ -177,6 +203,38 @@
     letter-spacing: 0.5px;
   }
 
+  .theme-selector {
+    display: flex;
+    gap: 4px;
+  }
+
+  .theme-selector label {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: all 0.15s;
+  }
+
+  .theme-selector label:hover {
+    border-color: #396cd8;
+  }
+
+  .theme-selector label.active {
+    border-color: #396cd8;
+    background: rgba(57, 108, 216, 0.08);
+  }
+
+  .theme-selector input[type="radio"] {
+    display: none;
+  }
+
   .toggle-row {
     display: flex;
     align-items: center;
@@ -242,36 +300,44 @@
     cursor: not-allowed;
   }
 
-  @media (prefers-color-scheme: dark) {
-    .modal {
-      background: #1a1a1a;
-    }
+  :global([data-theme="dark"]) .modal {
+    background: #1a1a1a;
+  }
 
-    .modal-header {
-      border-bottom-color: #333;
-    }
+  :global([data-theme="dark"]) .modal-header {
+    border-bottom-color: #333;
+  }
 
-    .close-btn {
-      color: #999;
-    }
+  :global([data-theme="dark"]) .close-btn {
+    color: #999;
+  }
 
-    .close-btn:hover {
-      background: #333;
-    }
+  :global([data-theme="dark"]) .close-btn:hover {
+    background: #333;
+  }
 
-    h3 {
-      color: #777;
-    }
+  :global([data-theme="dark"]) h3 {
+    color: #777;
+  }
 
-    .input-group input {
-      background: #2a2a2a;
-      border-color: #444;
-      color: #f6f6f6;
-    }
+  :global([data-theme="dark"]) .input-group input {
+    background: #2a2a2a;
+    border-color: #444;
+    color: #f6f6f6;
+  }
 
-    .clear-btn {
-      background: #2a2a2a;
-      border-color: #444;
-    }
+  :global([data-theme="dark"]) .clear-btn {
+    background: #2a2a2a;
+    border-color: #444;
+  }
+
+  :global([data-theme="dark"]) .theme-selector label {
+    border-color: #444;
+    color: #f6f6f6;
+  }
+
+  :global([data-theme="dark"]) .theme-selector label.active {
+    border-color: #396cd8;
+    background: rgba(57, 108, 216, 0.15);
   }
 </style>
