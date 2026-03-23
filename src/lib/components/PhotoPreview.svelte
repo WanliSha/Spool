@@ -13,6 +13,8 @@
   let panStart = { x: 0, y: 0, panX: 0, panY: 0 };
   let viewEl;
   let suppressAutoNav = false;
+  let previewMode = $state("quick"); // "quick" or "full"
+  let loadingFull = $state(false);
 
   function getStripPaths() {
     return isMultiSelect ? selectedPaths : allPaths;
@@ -22,13 +24,13 @@
   $effect(() => {
     if (isMultiSelect) {
       for (const p of selectedPaths) {
-        if (p && !previews[p]) loadPreview(p);
+        if (p && !previews[`${p}:quick`]) loadPreview(p, "quick");
       }
     } else {
       const paths = allPaths;
       for (let i = Math.max(0, currentIndex - 1); i <= Math.min(paths.length - 1, currentIndex + 1); i++) {
         const p = paths[i];
-        if (p && !previews[p]) loadPreview(p);
+        if (p && !previews[`${p}:quick`]) loadPreview(p, "quick");
       }
     }
   });
@@ -48,12 +50,38 @@
     }
   });
 
-  async function loadPreview(path) {
+  async function loadPreview(path, mode = "quick") {
+    const key = `${path}:${mode}`;
+    if (previews[key]) return;
     try {
-      const data = await invoke("get_preview", { path });
-      previews = { ...previews, [path]: data };
+      const data = await invoke("get_preview", { path, mode });
+      previews = { ...previews, [key]: data };
     } catch (e) {
       console.error("Preview error:", e);
+    }
+  }
+
+  function getPreviewData(path) {
+    // Try full first if in full mode, fallback to quick
+    if (previewMode === "full") {
+      const full = previews[`${path}:full`];
+      if (full) return full;
+    }
+    return previews[`${path}:quick`] || null;
+  }
+
+  async function toggleMode() {
+    if (isMultiSelect) return;
+    if (previewMode === "quick") {
+      previewMode = "full";
+      const p = currentPath();
+      if (p) {
+        loadingFull = true;
+        await loadPreview(p, "full");
+        loadingFull = false;
+      }
+    } else {
+      previewMode = "quick";
     }
   }
 
@@ -83,6 +111,7 @@
     const paths = allPaths;
     if (idx < 0 || idx >= paths.length) return;
     currentIndex = idx;
+    previewMode = "quick";
     resetView();
     suppressAutoNav = true;
     if (onnavigate && paths[idx]) onnavigate(paths[idx]);
@@ -190,8 +219,12 @@
       <button type="button" onclick={zoomOut}>−</button>
       <span class="zoom-label">{Math.round(zoom * 100)}%</span>
       <button type="button" onclick={zoomIn}>+</button>
-      <button type="button" onclick={resetView}>1:1</button>
+      <button type="button" onclick={resetView} title="Reset to 100%">100%</button>
       {#if !isMultiSelect}
+        <span class="separator"></span>
+        <button type="button" class="mode-toggle" class:active={previewMode === "full"} onclick={toggleMode} title="Full resolution: 1 pixel = 1 screen pixel">
+          {loadingFull ? "Loading..." : "1:1"}
+        </button>
         <span class="separator"></span>
         <button type="button" onclick={rotateCCW} title="Rotate CCW">↺</button>
         <button type="button" onclick={rotateCW} title="Rotate CW">↻</button>
@@ -214,8 +247,8 @@
         <div class="photo-grid" style={gridStyle()}>
           {#each selectedPaths as path}
             <div class="grid-item">
-              {#if previews[path]}
-                <img src="data:image/jpeg;base64,{previews[path]}" alt={path.split("/").pop()} draggable="false" />
+              {#if getPreviewData(path)}
+                <img src="data:image/jpeg;base64,{getPreviewData(path)}" alt={path.split("/").pop()} draggable="false" />
               {:else}
                 <div class="loading">Loading...</div>
               {/if}
@@ -227,15 +260,15 @@
       {@const path = currentPath()}
       {@const rot = rotation[path] || 0}
       <div class="zoom-frame" style="transform: translate({panX}px, {panY}px) scale({zoom});">
-        {#if path && previews[path]}
+        {#if path && getPreviewData(path)}
           <img
-            src="data:image/jpeg;base64,{previews[path]}"
+            src="data:image/jpeg;base64,{getPreviewData(path)}"
             alt={path.split("/").pop()}
             draggable="false"
             style="transform: rotate({rot}deg);"
           />
         {:else}
-          <div class="loading">Loading...</div>
+          <div class="loading">{loadingFull ? "Loading full resolution..." : "Loading..."}</div>
         {/if}
       </div>
     {:else}
@@ -302,6 +335,12 @@
     font-size: 11px;
     min-width: 36px;
     text-align: center;
+  }
+
+  .mode-toggle.active {
+    background: #396cd8;
+    border-color: #396cd8;
+    color: #fff;
   }
 
   .separator {

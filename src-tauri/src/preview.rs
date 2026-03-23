@@ -6,8 +6,9 @@ use std::path::Path;
 use std::sync::Mutex;
 use tauri::State;
 
-const PREVIEW_SIZE: u32 = 2048;
-const JPEG_QUALITY: u8 = 85;
+const QUICK_SIZE: u32 = 2048;
+const QUICK_QUALITY: u8 = 85;
+const FULL_QUALITY: u8 = 95;
 
 pub struct PreviewCache {
     cache: Mutex<HashMap<String, String>>,
@@ -22,11 +23,18 @@ impl PreviewCache {
 }
 
 #[tauri::command]
-pub fn get_preview(path: String, store: State<'_, PreviewCache>) -> Result<String, String> {
+pub fn get_preview(
+    path: String,
+    mode: Option<String>,
+    store: State<'_, PreviewCache>,
+) -> Result<String, String> {
+    let mode = mode.unwrap_or_else(|| "quick".to_string());
+    let cache_key = format!("{}:{}", path, mode);
+
     // Check cache
     {
         let cache = store.cache.lock().map_err(|e| e.to_string())?;
-        if let Some(data) = cache.get(&path) {
+        if let Some(data) = cache.get(&cache_key) {
             return Ok(data.clone());
         }
     }
@@ -38,16 +46,22 @@ pub fn get_preview(path: String, store: State<'_, PreviewCache>) -> Result<Strin
 
     let img = image::open(file_path).map_err(|e| format!("Cannot open image: {e}"))?;
 
-    // Resize to fit within PREVIEW_SIZE, maintaining aspect ratio
-    let preview = if img.width() > PREVIEW_SIZE || img.height() > PREVIEW_SIZE {
-        img.resize(PREVIEW_SIZE, PREVIEW_SIZE, FilterType::Lanczos3)
+    let (output, quality) = if mode == "full" {
+        // Full resolution — no resize
+        (img, FULL_QUALITY)
     } else {
-        img
+        // Quick mode — resize to fit within QUICK_SIZE
+        let resized = if img.width() > QUICK_SIZE || img.height() > QUICK_SIZE {
+            img.resize(QUICK_SIZE, QUICK_SIZE, FilterType::Lanczos3)
+        } else {
+            img
+        };
+        (resized, QUICK_QUALITY)
     };
 
     let mut buf = Vec::new();
-    let encoder = JpegEncoder::new_with_quality(&mut buf, JPEG_QUALITY);
-    preview
+    let encoder = JpegEncoder::new_with_quality(&mut buf, quality);
+    output
         .write_with_encoder(encoder)
         .map_err(|e| format!("Cannot encode preview: {e}"))?;
 
@@ -56,7 +70,7 @@ pub fn get_preview(path: String, store: State<'_, PreviewCache>) -> Result<Strin
     // Store in cache
     {
         let mut cache = store.cache.lock().map_err(|e| e.to_string())?;
-        cache.insert(path, b64.clone());
+        cache.insert(cache_key, b64.clone());
     }
 
     Ok(b64)
