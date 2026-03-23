@@ -6,6 +6,7 @@
   import MapPicker from "$lib/components/MapPicker.svelte";
   import PhotoPreview from "$lib/components/PhotoPreview.svelte";
   import Settings from "$lib/components/Settings.svelte";
+  import CfImport from "$lib/components/CfImport.svelte";
 
   // === Theme ===
   function applyTheme(theme) {
@@ -62,12 +63,28 @@
   let mapSavedVersion = $state(0);
   let showSettings = $state(false);
   let customFields = $state([]); // [{name, key}]
+  let cfImportMode = $state(false);
   let showPreview = $state(true);
   let showEditor = $state(true);
   let showMap = $state(true);
   let fileListWidth = $state(250); // pixels
   let previewHeight = $state(50); // percentage of right area
   let editorWidth = $state(50);   // percentage of bottom area
+
+  // === C&F Import ===
+  async function handleCfComplete(photoPaths) {
+    cfImportMode = false;
+    // Load the written photos into normal mode
+    const entries = await invoke("scan_paths", { paths: photoPaths });
+    files = entries;
+    for (const entry of entries) {
+      loadThumbnail(entry.path);
+    }
+    if (entries.length > 0) {
+      selectedPaths = new Set([entries[0].path]);
+      refreshMergedFields();
+    }
+  }
 
   // === Custom Fields ===
   async function loadCustomFields() {
@@ -712,7 +729,12 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <main class="container">
-  {#if files.length === 0}
+  {#if cfImportMode}
+    <CfImport
+      oncomplete={handleCfComplete}
+      oncancel={() => cfImportMode = false}
+    />
+  {:else if files.length === 0}
     <div class="drop-zone-wrapper">
       <div class="top-bar">
         <button class="settings-btn" onclick={() => showSettings = true} title="Settings (Cmd+,)">&#9881;</button>
@@ -725,6 +747,9 @@
           <div class="buttons">
             <button onclick={openFiles}>Open Files</button>
             <button onclick={openFolder}>Open Folder</button>
+          </div>
+          <div class="cf-link">
+            <button class="cf-btn" onclick={() => cfImportMode = true}>Import from Crown & Flint</button>
           </div>
         </div>
       </div>
@@ -996,6 +1021,19 @@
   .drop-or {
     color: #888;
     margin: 8px 0;
+  }
+
+  .cf-link {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid #eee;
+  }
+
+  .cf-btn {
+    font-size: 12px;
+    color: #666;
+    background: none;
+    border: 1px solid #ddd;
   }
 
   .buttons {

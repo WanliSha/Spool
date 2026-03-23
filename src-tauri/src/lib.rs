@@ -1,3 +1,4 @@
+mod cf_import;
 mod decode;
 mod exif;
 mod iptc;
@@ -106,6 +107,9 @@ pub fn run() {
             preview::get_preview,
             settings::load_settings,
             settings::save_settings,
+            cf_import::parse_cf_json,
+            cf_import::get_cf_preview,
+            cf_import::write_cf_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
