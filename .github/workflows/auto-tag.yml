@@ -4,7 +4,9 @@ on:
   push:
     branches: [main]
     paths:
+      - "package.json"
       - "src-tauri/Cargo.toml"
+      - "src-tauri/tauri.conf.json"
 
 jobs:
   tag:
@@ -16,27 +18,42 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get version from Cargo.toml
+      - name: Get versions from all sources
         id: version
         run: |
-          version=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          echo "version=$version" >> $GITHUB_OUTPUT
-          echo "Detected version: $version"
+          pkg=$(node -p "require('./package.json').version")
+          cargo=$(grep '^version' src-tauri/Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          tauri=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "pkg=$pkg" >> $GITHUB_OUTPUT
+          echo "cargo=$cargo" >> $GITHUB_OUTPUT
+          echo "tauri=$tauri" >> $GITHUB_OUTPUT
+          echo "package.json: $pkg"
+          echo "Cargo.toml: $cargo"
+          echo "tauri.conf.json: $tauri"
+
+      - name: Check version consistency
+        run: |
+          if [ "${{ steps.version.outputs.pkg }}" != "${{ steps.version.outputs.cargo }}" ] || \
+             [ "${{ steps.version.outputs.pkg }}" != "${{ steps.version.outputs.tauri }}" ]; then
+            echo "::error::Version mismatch! package.json=${{ steps.version.outputs.pkg }} Cargo.toml=${{ steps.version.outputs.cargo }} tauri.conf.json=${{ steps.version.outputs.tauri }}"
+            exit 1
+          fi
+          echo "All versions match: ${{ steps.version.outputs.pkg }}"
 
       - name: Check if tag exists
         id: check
         run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+          if git rev-parse "v${{ steps.version.outputs.pkg }}" >/dev/null 2>&1; then
             echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.version.outputs.version }} already exists"
+            echo "Tag v${{ steps.version.outputs.pkg }} already exists"
           else
             echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.version.outputs.version }} does not exist"
+            echo "Tag v${{ steps.version.outputs.pkg }} does not exist"
           fi
 
       - name: Create tag
         if: steps.check.outputs.exists == 'false'
         run: |
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
-          echo "Created and pushed tag v${{ steps.version.outputs.version }}"
+          git tag "v${{ steps.version.outputs.pkg }}"
+          git push origin "v${{ steps.version.outputs.pkg }}"
+          echo "Created and pushed tag v${{ steps.version.outputs.pkg }}"
