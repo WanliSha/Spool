@@ -1,4 +1,4 @@
-name: Auto Tag
+name: Auto Tag & Release
 
 on:
   workflow_run:
@@ -7,11 +7,15 @@ on:
     branches: [main]
 
 jobs:
-  tag:
+  check-version:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      should_release: ${{ steps.check.outputs.new }}
+      version: ${{ steps.version.outputs.pkg }}
+      release_id: ${{ steps.create-release.outputs.result }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,28 +30,22 @@ jobs:
           echo "pkg=$pkg" >> $GITHUB_OUTPUT
           echo "cargo=$cargo" >> $GITHUB_OUTPUT
           echo "tauri=$tauri" >> $GITHUB_OUTPUT
-          echo "package.json: $pkg"
-          echo "Cargo.toml: $cargo"
-          echo "tauri.conf.json: $tauri"
 
       - name: Check version consistency
         run: |
           if [ "${{ steps.version.outputs.pkg }}" != "${{ steps.version.outputs.cargo }}" ] || \
              [ "${{ steps.version.outputs.pkg }}" != "${{ steps.version.outputs.tauri }}" ]; then
-            echo "::error::Version mismatch! package.json=${{ steps.version.outputs.pkg }} Cargo.toml=${{ steps.version.outputs.cargo }} tauri.conf.json=${{ steps.version.outputs.tauri }}"
+            echo "::error::Version mismatch!"
             exit 1
           fi
-          echo "All versions match: ${{ steps.version.outputs.pkg }}"
 
       - name: Check if tag exists
         id: check
         run: |
           if git rev-parse "v${{ steps.version.outputs.pkg }}" >/dev/null 2>&1; then
             echo "new=false" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.version.outputs.pkg }} already exists"
           else
             echo "new=true" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.version.outputs.pkg }} is new"
           fi
 
       - name: Create tag
@@ -55,4 +53,101 @@ jobs:
         run: |
           git tag "v${{ steps.version.outputs.pkg }}"
           git push origin "v${{ steps.version.outputs.pkg }}"
-          echo "Created and pushed tag v${{ steps.version.outputs.pkg }}"
+
+      - name: Create GitHub Release (draft)
+        if: steps.check.outputs.new == 'true'
+        id: create-release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: `v${{ steps.version.outputs.pkg }}`,
+              name: `Spool v${{ steps.version.outputs.pkg }}`,
+              draft: true,
+              prerelease: false,
+            })
+            return data.id
+
+  build-and-upload:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+            args: ""
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.check-version.outputs.version }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and upload
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.check-version.outputs.release_id }}
+          args: ${{ matrix.args }}
+
+  publish-release:
+    needs: [check-version, build-and-upload]
+    if: needs.check-version.outputs.should_release == 'true'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish release
+        uses: actions/github-script@v7
+        env:
+          release_id: ${{ needs.check-version.outputs.release_id }}
+        with:
+          script: |
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: process.env.release_id,
+              draft: false,
+            })
