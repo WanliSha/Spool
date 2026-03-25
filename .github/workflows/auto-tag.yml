@@ -81,12 +81,20 @@ jobs:
         include:
           - platform: ubuntu-latest
             args: ""
+            cli-target: x86_64-unknown-linux-gnu
+            cli-artifact: spool-cli-linux-x64
           - platform: macos-latest
             args: "--target aarch64-apple-darwin"
+            cli-target: aarch64-apple-darwin
+            cli-artifact: spool-cli-darwin-arm64
           - platform: macos-latest
             args: "--target x86_64-apple-darwin"
+            cli-target: x86_64-apple-darwin
+            cli-artifact: spool-cli-darwin-x64
           - platform: windows-latest
             args: ""
+            cli-target: x86_64-pc-windows-msvc
+            cli-artifact: spool-cli-windows-x64
 
     runs-on: ${{ matrix.platform }}
 
@@ -119,18 +127,64 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: ". -> target"
 
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Build and upload
+      - name: Build CLI and place in Tauri binaries
+        shell: bash
+        run: ./scripts/build-cli.sh --target ${{ matrix.cli-target }} --release
+
+      - name: Build Tauri app and upload
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           releaseId: ${{ needs.check-version.outputs.release_id }}
           args: ${{ matrix.args }}
+
+      - name: Package standalone CLI
+        shell: bash
+        run: |
+          EXT=""
+          ARCHIVE_EXT="tar.gz"
+          if [[ "${{ matrix.cli-target }}" == *"windows"* ]]; then
+            EXT=".exe"
+            ARCHIVE_EXT="zip"
+          fi
+
+          CLI_BIN="src-tauri/binaries/spool-${{ matrix.cli-target }}${EXT}"
+          ARTIFACT="${{ matrix.cli-artifact }}"
+
+          mkdir -p "dist-cli"
+          cp "$CLI_BIN" "dist-cli/spool${EXT}"
+
+          if [ "$ARCHIVE_EXT" = "zip" ]; then
+            cd dist-cli && 7z a "../${ARTIFACT}.zip" "spool${EXT}" && cd ..
+          else
+            tar -czf "${ARTIFACT}.tar.gz" -C dist-cli "spool${EXT}"
+          fi
+
+      - name: Upload standalone CLI
+        uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.check-version.outputs.release_id }}
+        with:
+          script: |
+            const fs = require('fs');
+            const target = '${{ matrix.cli-target }}';
+            const isWindows = target.includes('windows');
+            const ext = isWindows ? 'zip' : 'tar.gz';
+            const artifact = `${{ matrix.cli-artifact }}.${ext}`;
+            const data = fs.readFileSync(artifact);
+            await github.rest.repos.uploadReleaseAsset({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: parseInt(process.env.RELEASE_ID),
+              name: artifact,
+              data: data,
+            });
 
   publish-release:
     needs: [check-version, build-and-upload]

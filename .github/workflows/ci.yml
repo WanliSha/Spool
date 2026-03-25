@@ -46,10 +46,14 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: ". -> target"
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Build CLI and place in Tauri binaries
+        shell: bash
+        run: ./scripts/build-cli.sh --release
 
       - name: Build
         uses: tauri-apps/tauri-action@v0

@@ -4,6 +4,7 @@ Cargo.lock
 
 # Tauri
 /src-tauri/target/
+/src-tauri/binaries/
 
 # Node / Frontend
 node_modules/
@@ -14,7 +15,8 @@ dist/
 Thumbs.db
 
 # Claude Code
-.claude/
+.claude/settings.local.json
+.claude/commands/
 
 # IDE
 .vscode/

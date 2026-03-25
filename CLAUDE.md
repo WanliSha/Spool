@@ -7,7 +7,6 @@ Rust (Tauri) + Svelte + Leaflet.js (OpenStreetMap).
 ## Project Context
 - Specs: `openspec/specs/`
 - Changes: `openspec/changes/`
-- Roadmap: `openspec/ROADMAP.md`
 - OpenSpec config: `openspec/config.yaml`
 
 ## Tech Stack
