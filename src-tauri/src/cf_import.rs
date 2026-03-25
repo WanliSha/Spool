@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::metadata;
+use spool_core::metadata;
 
 #[derive(Deserialize)]
 struct CfJsonEntry {

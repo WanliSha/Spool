@@ -1,21 +1,13 @@
 mod cf_import;
 mod decode;
 mod exif;
-mod iptc;
 mod metadata;
 mod preview;
 mod settings;
 mod thumbnail;
-mod xmp;
 
 use serde::Serialize;
-use std::fs;
 use std::path::Path;
-
-const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "jpg", "jpeg", "tif", "tiff", "png", "webp", "bmp",
-    "cr2", "cr3", "nef", "arw", "raf", "dng", "orf", "rw2",
-];
 
 #[derive(Serialize)]
 struct FileEntry {
@@ -24,38 +16,12 @@ struct FileEntry {
     size: u64,
 }
 
-fn is_supported(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| SUPPORTED_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
-        .unwrap_or(false)
-}
-
-fn collect_files(path: &Path, recursive: bool, results: &mut Vec<FileEntry>) {
-    if path.is_file() {
-        if is_supported(path) {
-            if let Ok(metadata) = fs::metadata(path) {
-                results.push(FileEntry {
-                    path: path.to_string_lossy().to_string(),
-                    filename: path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string(),
-                    size: metadata.len(),
-                });
-            }
-        }
-    } else if path.is_dir() {
-        if let Ok(entries) = fs::read_dir(path) {
-            for entry in entries.flatten() {
-                let entry_path = entry.path();
-                if entry_path.is_file() {
-                    collect_files(&entry_path, recursive, results);
-                } else if recursive && entry_path.is_dir() {
-                    collect_files(&entry_path, recursive, results);
-                }
-            }
+impl From<spool_core::FileEntry> for FileEntry {
+    fn from(e: spool_core::FileEntry) -> Self {
+        Self {
+            path: e.path,
+            filename: e.filename,
+            size: e.size,
         }
     }
 }
@@ -67,10 +33,11 @@ fn scan_paths(
     settings_store: tauri::State<'_, settings::SettingsStore>,
 ) -> Vec<FileEntry> {
     let recursive = recursive.unwrap_or_else(|| settings_store.get_recursive());
-    let mut results = Vec::new();
+    let mut core_results = Vec::new();
     for p in &paths {
-        collect_files(Path::new(p), recursive, &mut results);
+        spool_core::collect_files(Path::new(p), recursive, &mut core_results);
     }
+    let mut results: Vec<FileEntry> = core_results.into_iter().map(FileEntry::from).collect();
     results.sort_by(|a, b| a.filename.cmp(&b.filename));
     results
 }

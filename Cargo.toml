@@ -1,0 +1,3 @@
+[workspace]
+members = ["spool-core", "spool-cli", "src-tauri"]
+resolver = "2"
